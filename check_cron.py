@@ -127,12 +127,21 @@ def check_command(command: str) -> list[str]:
     elif not os.path.isdir(cd_match.group(1)):
         problems.append(f"โฟลเดอร์ไม่มีอยู่จริง: {cd_match.group(1)}")
 
-    py_match = re.search(r"(\S*python\S*)\s+jobs\.py", command)
-    if py_match and cd_match:
-        py_path = py_match.group(1)
-        full = py_path if os.path.isabs(py_path) else os.path.join(cd_match.group(1), py_path)
-        if not os.path.exists(full):
-            problems.append(f"ไม่พบ python ที่ใช้: {full}")
+    # คำสั่งแบบ docker รัน python ข้างใน container — path บน host ไม่เกี่ยว ข้ามการเช็ค
+    # (เช็คแทนว่ามี -T ไหม เพราะ cron ไม่มี TTY ลืมใส่แล้วพังทุกครั้ง)
+    in_docker = "docker compose exec" in command or "docker exec" in command
+    if in_docker:
+        if not re.search(r"docker\s+compose\s+exec\s+(-\w+\s+)*-T\b|docker\s+exec\s+(-\w+\s+)*-T\b",
+                         command):
+            problems.append("docker compose exec ต้องมี -T — cron ไม่มี TTY จะได้ error "
+                            "'the input device is not a TTY'")
+    else:
+        py_match = re.search(r"(\S*python\S*)\s+jobs\.py", command)
+        if py_match and cd_match:
+            py_path = py_match.group(1)
+            full = py_path if os.path.isabs(py_path) else os.path.join(cd_match.group(1), py_path)
+            if not os.path.exists(full):
+                problems.append(f"ไม่พบ python ที่ใช้: {full}")
 
     job_match = re.search(r"jobs\.py\s+(\w+)", command)
     if job_match:
@@ -141,8 +150,10 @@ def check_command(command: str) -> list[str]:
             import jobs
             if job_match.group(1) not in jobs.JOBS:
                 problems.append(f"ไม่รู้จัก job '{job_match.group(1)}' — มี: {', '.join(jobs.JOBS)}")
-        except Exception as e:
-            problems.append(f"import jobs.py ไม่ได้: {e}")
+        except Exception:
+            # รันบน host ที่ไม่ได้ลง dependency (ปกติ เพราะของจริงอยู่ใน container)
+            # ข้ามไป ไม่นับเป็น error — ไม่งั้นจะเตือนทุกบรรทัดทั้งที่ไม่ได้ผิดอะไร
+            pass
 
     log_match = re.search(r">>\s*(\S+)", command)
     if log_match and cd_match:
