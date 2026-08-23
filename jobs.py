@@ -14,7 +14,7 @@ crontab (เวลาไทย):
 import sys
 import time
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 
@@ -53,6 +53,24 @@ ATTEMPTS = 3
 RETRY_WAIT = 30      # วินาที — เว็บล่มมักใช้เวลาฟื้นระดับนี้ ยิงรัวไม่ช่วยอะไร
 
 
+def _log_run(name: str, started, status: str, attempts: int,
+             rows_written: int, error: str | None) -> None:
+    """บันทึกผลการรันลง job_run_log — ห้ามทำให้ job พังเพราะ log เขียนไม่ได้
+
+    error ถูกตัดที่ 2000 ตัวอักษร เพราะ traceback บางตัวยาวเป็นหมื่น (เห็นจาก MEA ตอนล่ม)
+    เก็บทั้งหมดก็อ่านไม่ไหวอยู่ดี ส่วนต้นบอกสาเหตุครบแล้ว
+    """
+    try:
+        db.save_rows("job_run_log", [{
+            "job_name": name, "started_at": started,
+            "finished_at": datetime.now(timezone.utc), "status": status,
+            "attempts": attempts, "rows_written": rows_written,
+            "error": error[:2000] if error else None,
+        }])
+    except Exception as e:
+        print(f"  ⚠️  เขียน job_run_log ไม่สำเร็จ: {type(e).__name__}: {e}")
+
+
 def run_job(name: str, **kwargs) -> int:
     """ดึงข้อมูล + เขียนลง DB — คืนจำนวนแถว, raise ถ้าพังครบทุกครั้ง (cron จับจาก exit code)
 
@@ -64,28 +82,38 @@ def run_job(name: str, **kwargs) -> int:
         raise ValueError(f"ไม่รู้จักงาน '{name}' — ตัวเลือก: {', '.join(JOBS)}")
 
     table, fn = JOBS[name]
-    started = datetime.now()
-    print(f"[{started:%Y-%m-%d %H:%M:%S}] {name} → {table}")
+    started = datetime.now(timezone.utc)
+    print(f"[{started.astimezone():%Y-%m-%d %H:%M:%S}] {name} → {table}")
 
-    for attempt in range(1, ATTEMPTS + 1):
-        try:
-            rows = fn(verbose=False, **kwargs)
-            break
-        except Exception as e:
-            if attempt == ATTEMPTS:
-                raise
-            print(f"  ⚠️  ครั้งที่ {attempt}/{ATTEMPTS} ล้มเหลว ({type(e).__name__}: {e}) "
-                  f"— รอ {RETRY_WAIT} วิแล้วลองใหม่")
-            time.sleep(RETRY_WAIT)
+    used = 0
+    try:
+        for attempt in range(1, ATTEMPTS + 1):
+            used = attempt
+            try:
+                rows = fn(verbose=False, **kwargs)
+                break
+            except Exception as e:
+                if attempt == ATTEMPTS:
+                    raise
+                print(f"  ⚠️  ครั้งที่ {attempt}/{ATTEMPTS} ล้มเหลว ({type(e).__name__}: {e}) "
+                      f"— รอ {RETRY_WAIT} วิแล้วลองใหม่")
+                time.sleep(RETRY_WAIT)
 
-    written = db.save_rows(table, rows)
+        written = db.save_rows(table, rows)
 
-    # ราคาต้องเทียบกับแถวก่อนหน้าที่อยู่ใน DB — คำนวณหลังเขียนเสร็จเท่านั้น
-    if name == "food_price":
-        changed = db.recompute_price_change()
-        print(f"  📊 อัปเดต price_change {changed} แถว")
+        # ราคาต้องเทียบกับแถวก่อนหน้าที่อยู่ใน DB — คำนวณหลังเขียนเสร็จเท่านั้น
+        if name == "food_price":
+            changed = db.recompute_price_change()
+            print(f"  📊 อัปเดต price_change {changed} แถว")
+    except Exception as e:
+        # บันทึกความพังไว้ก่อนโยนต่อ — ไม่งั้นรู้แค่ว่า exit 1 แต่ไม่รู้ว่าพังเพราะอะไร
+        # เขียน log ไม่สำเร็จก็ห้ามกลบ error ตัวจริง (เช่น DB ล่มจนเขียนอะไรไม่ได้เลย)
+        _log_run(name, started, "failed", used, 0, f"{type(e).__name__}: {e}")
+        raise
 
-    elapsed = (datetime.now() - started).total_seconds()
+    _log_run(name, started, "success", used, written, None)
+
+    elapsed = (datetime.now(timezone.utc) - started).total_seconds()
     print(f"  ✅ {written} แถว ({elapsed:.1f}s)")
     return written
 

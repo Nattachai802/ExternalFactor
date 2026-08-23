@@ -7,7 +7,9 @@ modules/*.py เท่านั้น ทุก endpoint เป็น GET (อ�
 """
 import calendar
 from datetime import date as _date
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+TH_TZ = timezone(timedelta(hours=7))
 
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
@@ -131,6 +133,63 @@ def resolve_branch(branch_id: str) -> dict:
 @app.get("/", summary="Health check")
 def root():
     return {"status": "ok", "service": "exFactor API v1"}
+
+
+# ── สุขภาพของ cron ───────────────────────────────────────────
+# ตาราง job_run_log ที่ไม่มีใคร query ก็ไร้ค่าพอๆ กับ log ที่ไม่มีใครอ่าน — เปิดเป็น endpoint
+# ให้เช็คได้จากเบราว์เซอร์/monitoring โดยไม่ต้อง SSH เข้าเครื่อง
+@app.get("/api/v1/health/jobs", summary="สถานะการรันล่าสุดของ cron job แต่ละตัว")
+def get_job_health():
+    rows = db.query("""
+        SELECT DISTINCT ON (job_name)
+               job_name, started_at, finished_at, status, attempts, rows_written, error
+        FROM job_run_log
+        ORDER BY job_name, started_at DESC
+    """)
+
+    now = datetime.now(timezone.utc)
+    # เกินกำหนดแค่ไหนถึงถือว่าผิดปกติ — เผื่อจากรอบจริงพอสมควร กัน alert ลวง
+    # (เช่น daily ตั้ง 2 วัน ไม่ใช่ 1 วัน เพราะ cron อาจรันช้าไปนิดหรือเครื่องเพิ่ง reboot)
+    MAX_AGE = {"energy": 2, "myth": 2, "food_price": 2,
+               "economic": 10, "electricity": 40, "wage": 40,
+               "lucky_shirt": 200, "holiday": 200}
+
+    jobs_out, unhealthy = [], 0
+    for r in rows:
+        age_days = (now - r["started_at"]).total_seconds() / 86400
+        stale = age_days > MAX_AGE.get(r["job_name"], 2)
+        ok = r["status"] == "success" and not stale
+        if not ok:
+            unhealthy += 1
+
+        jobs_out.append({
+            "งาน": r["job_name"],
+            "สถานะ": "ปกติ" if ok else ("ล้มเหลว" if r["status"] != "success" else "ไม่ได้รันนานเกินกำหนด"),
+            "รันล่าสุด": r["started_at"].astimezone(TH_TZ).isoformat(),
+            "นานมาแล้ว (วัน)": round(age_days, 1),
+            "จำนวนครั้งที่ยิง": r["attempts"],
+            "แถวที่เขียน": r["rows_written"],
+            "ข้อผิดพลาด": r["error"],
+        })
+
+    missing = [j for j in modules_job_names() if j not in {r["job_name"] for r in rows}]
+
+    return {
+        "สถานะรวม": "ปกติ" if not unhealthy and not missing else "มีปัญหา",
+        "จำนวนงานที่มีปัญหา": unhealthy,
+        "งานที่ยังไม่เคยรันเลย": missing,
+        "งาน": jobs_out,
+    }
+
+
+def modules_job_names() -> list[str]:
+    """ชื่อ job ทั้งหมดที่ควรมี — อ่านจาก jobs.py ตรงๆ ไม่ hardcode ซ้ำ
+
+    import ในฟังก์ชันเพราะ jobs.py import โมดูล scrape ครบทุกตัว ถ้า import ตอน startup
+    จะทำให้ API ช้าขึ้นโดยไม่จำเป็น (endpoint นี้นานๆ เรียกที)
+    """
+    import jobs
+    return list(jobs.JOBS)
 
 
 # ── ปฏิทินจีน ────────────────────────────────────────────────

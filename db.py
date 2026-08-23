@@ -118,6 +118,27 @@ TABLES: dict[str, dict] = {
             ALTER TABLE fact_dit_price ADD COLUMN IF NOT EXISTS price_change NUMERIC;
         """,
     },
+    # บันทึกทุกครั้งที่ cron รัน job — ตอบคำถาม "cron ยังทำงานอยู่ไหม" ได้ด้วย SQL
+    # ไม่มีตารางนี้ = job พังตอนตี 1 แล้วไม่มีใครรู้จนลูกค้าบ่นว่าข้อมูลไม่อัปเดต
+    # (traceback ลง log ไฟล์ก็จริง แต่ไม่มีใครเปิดอ่านทุกวัน)
+    #
+    # PK มี started_at ด้วย เก็บทุกรอบเป็นประวัติ ไม่ทับของเก่า — ดูย้อนหลังได้ว่า
+    # เริ่มพังตั้งแต่เมื่อไหร่ ตารางโตช้ามาก (8 job/วัน = ~3,000 แถว/ปี)
+    "job_run_log": {
+        "pk": ["job_name", "started_at"],
+        "ddl": """
+            CREATE TABLE IF NOT EXISTS job_run_log (
+                job_name TEXT NOT NULL,
+                started_at TIMESTAMPTZ NOT NULL,
+                finished_at TIMESTAMPTZ,
+                status TEXT NOT NULL,
+                attempts INT,
+                rows_written INT,
+                error TEXT,
+                PRIMARY KEY (job_name, started_at)
+            )
+        """,
+    },
     # cache ของ branch API + Nominatim — ไม่ใช่ fact เพราะไม่แปรตามวัน (สาขาไม่ย้ายที่)
     # อยู่ Postgres ไม่ใช่ sqlite เพราะหลาย instance ต้องแชร์ cache กัน ไม่งั้น
     # แต่ละเครื่อง geocode ซ้ำเอง ทั้งที่ Nominatim จำกัด 1 req/วินาที

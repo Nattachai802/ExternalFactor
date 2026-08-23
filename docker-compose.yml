@@ -5,10 +5,20 @@
 # ⚠️ ก่อนรัน ต้องแก้ .env: DATABASE_URL=postgresql://postgres:postgres@db:5432/exfactor
 #    (เปลี่ยน localhost → db — ชื่อต้องตรงกับ service ด้านล่าง)
 
+# จำกัดขนาด log — Docker driver json-file ไม่ลบไฟล์เก่าเองเลยถ้าไม่ตั้ง
+# uvicorn log ทุก request (~100 bytes) วันละหลายพันครั้ง = โตไม่มีวันหยุด
+# disk เต็มเมื่อไหร่ Postgres เขียนไม่ได้ = ล่มทั้งระบบ และแก้ยากเพราะไม่เหลือที่ให้ทำอะไร
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"    # ไฟล์ละ 10MB
+    max-file: "3"      # เก็บ 3 ไฟล์ = สูงสุด 30MB ต่อ service แล้วหมุนทับ
+
 services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -26,6 +36,7 @@ services:
   api:
     build: .
     restart: unless-stopped
+    logging: *default-logging
     env_file: .env
     ports:
       - "8000:8000"
