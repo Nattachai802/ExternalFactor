@@ -1,0 +1,31 @@
+# กัน build context บวม — .venv อย่างเดียวก็ 596MB, data/ 18MB, output/ 14MB
+# ทั้งที่ Dockerfile ไม่ได้ COPY สิ่งเหล่านี้เข้า image เลย แต่ยังโดนส่งเข้า daemon
+# ถ้าไม่กันไว้ (docker build ส่ง build context ทั้งหมดก่อนเริ่ม build เสมอ)
+.venv/
+__pycache__/
+*.pyc
+.git/
+.env
+.env.*
+
+# สคริปต์/notebook ทดลองเก่า — ไม่ได้ import จาก app_v1.py หรือ jobs.py เลย
+analysis_pipeline.py
+analysis_pipeline_v2.py
+add_economic_module.py
+app.py
+brenchmark.ipynb
+brenchmarkV2.ipynb
+cleanup_policy.py
+consumer_trends.py
+optimize_threshold.py
+pipeline.py
+ratchakitcha_search.py
+run_news_standalone.py
+test_*.py
+flowchart.md
+index.html
+example_output
+noted/
+scratch/
+data/
+output/

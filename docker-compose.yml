@@ -1,0 +1,37 @@
+# รัน: docker compose up -d
+# ทั้ง 2 service อยู่ network เดียวกันอัตโนมัติ (compose สร้างให้) — api เรียก db ผ่าน
+# ชื่อ service "db" ได้เลย ไม่ต้องพึ่ง localhost/host.docker.internal ที่พังบน Linux/EC2
+#
+# ⚠️ ก่อนรัน ต้องแก้ .env: DATABASE_URL=postgresql://postgres:postgres@db:5432/exfactor
+#    (เปลี่ยน localhost → db — ชื่อต้องตรงกับ service ด้านล่าง)
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: exfactor
+    volumes:
+      - pgdata:/var/lib/postgresql/data   # ข้อมูลอยู่รอด แม้ container ถูกลบ/สร้างใหม่
+    ports:
+      - "5432:5432"   # เปิดออก host ไว้เผื่อต้องต่อด้วย psql/GUI จากนอก container — ปิดได้ถ้าไม่ใช้
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy   # รอ Postgres พร้อมรับ connection ก่อน แทนการเดา sleep
+
+volumes:
+  pgdata:

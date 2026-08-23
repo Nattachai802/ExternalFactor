@@ -1,0 +1,39 @@
+# secrets — ห้ามขึ้น git เด็ดขาด
+.env
+.env.*
+!.env.example
+
+# runtime / cache — สร้างใหม่ได้เสมอ ไม่ใช่ source
+__pycache__/
+*.pyc
+.venv/
+output/
+*.db
+
+# mock/ตัวอย่างข้อมูล (18MB) — ไม่ใช่ source, โหลดจากที่เก็บข้อมูลจริงแทน
+data/
+
+# สคริปต์/notebook ทดลองเก่า — ไม่ได้ใช้งานจริงใน app_v1.py/jobs.py
+analysis_pipeline.py
+analysis_pipeline_v2.py
+add_economic_module.py
+app.py
+brenchmark.ipynb
+brenchmarkV2.ipynb
+cleanup_policy.py
+consumer_trends.py
+optimize_threshold.py
+pipeline.py
+ratchakitcha_search.py
+run_news_standalone.py
+test_global_factors.py
+test_news.py
+test_qmrl_almanac.py
+flowchart.md
+index.html
+example_output
+noted/
+scratch/
+
+# OS junk
+.DS_Store
