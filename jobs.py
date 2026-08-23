@@ -12,6 +12,7 @@ crontab (เวลาไทย):
     0  1 * * 1  cd /path/to/ex-factor && .venv/bin/python jobs.py wage
 """
 import sys
+import time
 import traceback
 from datetime import datetime
 
@@ -45,8 +46,20 @@ JOBS = {
 }
 
 
+# เว็บต้นทางเกือบทั้งหมดเป็นเว็บราชการไทย (MEA, EPPO, DIT, กระทรวงแรงงาน) ซึ่งล่มเป็นระยะ
+# ยิงซ้ำมักผ่าน — วัดจริงแล้วครั้งที่ 1 fail ครั้งที่ 2-3 ผ่าน (ConnectionResetError)
+# cron รันตี 1-4 ไม่มีคนเฝ้า ไม่มี retry = สะดุดวินาทีเดียวก็ไม่มีข้อมูลทั้งวัน
+ATTEMPTS = 3
+RETRY_WAIT = 30      # วินาที — เว็บล่มมักใช้เวลาฟื้นระดับนี้ ยิงรัวไม่ช่วยอะไร
+
+
 def run_job(name: str, **kwargs) -> int:
-    """ดึงข้อมูล + เขียนลง DB — คืนจำนวนแถว, raise ถ้าพัง (cron จะจับจาก exit code)"""
+    """ดึงข้อมูล + เขียนลง DB — คืนจำนวนแถว, raise ถ้าพังครบทุกครั้ง (cron จับจาก exit code)
+
+    retry ทั้ง job ไม่ใช่ราย request เพราะแก้ที่เดียวครอบทุกโมดูล ไม่ต้องแตะ 8 ไฟล์
+    แลกกับการ scrape ซ้ำตั้งแต่ต้นเมื่อพลาด — ยอมได้ เพราะเกิดเฉพาะตอน error
+    และ job พวกนี้รันกลางดึกไม่มีใครรอ
+    """
     if name not in JOBS:
         raise ValueError(f"ไม่รู้จักงาน '{name}' — ตัวเลือก: {', '.join(JOBS)}")
 
@@ -54,7 +67,17 @@ def run_job(name: str, **kwargs) -> int:
     started = datetime.now()
     print(f"[{started:%Y-%m-%d %H:%M:%S}] {name} → {table}")
 
-    rows = fn(verbose=False, **kwargs)
+    for attempt in range(1, ATTEMPTS + 1):
+        try:
+            rows = fn(verbose=False, **kwargs)
+            break
+        except Exception as e:
+            if attempt == ATTEMPTS:
+                raise
+            print(f"  ⚠️  ครั้งที่ {attempt}/{ATTEMPTS} ล้มเหลว ({type(e).__name__}: {e}) "
+                  f"— รอ {RETRY_WAIT} วิแล้วลองใหม่")
+            time.sleep(RETRY_WAIT)
+
     written = db.save_rows(table, rows)
 
     # ราคาต้องเทียบกับแถวก่อนหน้าที่อยู่ใน DB — คำนวณหลังเขียนเสร็จเท่านั้น
