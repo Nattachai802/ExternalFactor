@@ -140,12 +140,17 @@ def root():
 # ให้เช็คได้จากเบราว์เซอร์/monitoring โดยไม่ต้อง SSH เข้าเครื่อง
 @app.get("/api/v1/health/jobs", summary="สถานะการรันล่าสุดของ cron job แต่ละตัว")
 def get_job_health():
-    rows = db.query("""
-        SELECT DISTINCT ON (job_name)
-               job_name, started_at, finished_at, status, attempts, rows_written, error
-        FROM job_run_log
-        ORDER BY job_name, started_at DESC
-    """)
+    # ตาราง job_run_log ถูกสร้างตอน job แรกเขียนลงไป (save_rows → ensure_table)
+    # deploy ใหม่ที่ยังไม่เคยรัน job เลยจะยังไม่มีตาราง — ถือเป็น "ยังไม่เคยรัน" ไม่ใช่ error
+    try:
+        rows = db.query("""
+            SELECT DISTINCT ON (job_name)
+                   job_name, started_at, finished_at, status, attempts, rows_written, error
+            FROM job_run_log
+            ORDER BY job_name, started_at DESC
+        """)
+    except Exception:
+        rows = []
 
     now = datetime.now(timezone.utc)
     # เกินกำหนดแค่ไหนถึงถือว่าผิดปกติ — เผื่อจากรอบจริงพอสมควร กัน alert ลวง
