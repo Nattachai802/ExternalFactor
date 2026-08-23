@@ -1,0 +1,54 @@
+# exFactor — cron jobs สำหรับ EC2 (รันผ่าน Docker)
+#
+# ต่างจาก crontab.txt (ของเครื่อง dev) 2 จุด:
+#   path  = /home/ubuntu/ExternalFactor  ไม่ใช่ path บน Mac
+#   คำสั่ง = docker compose exec -T api  ไม่ใช่ .venv/bin/python (EC2 ไม่มี venv รันใน container)
+#
+# ⚠️ ต้องมี -T เสมอ — cron ไม่มี TTY ถ้าไม่ใส่จะได้ error "the input device is not a TTY"
+#
+# ติดตั้ง:
+#   crontab /home/ubuntu/ExternalFactor/crontab.ec2.txt
+# ดู:
+#   crontab -l
+# ดู log งานที่รันไปแล้ว:
+#   tail -f /home/ubuntu/ExternalFactor/output/cron_energy.log
+#
+# ⚠️ ก่อนติดตั้ง ต้องทำ 3 อย่าง:
+#   1. sudo timedatectl set-timezone Asia/Bangkok      (ไม่งั้นเวลาเพี้ยน 7 ชม.)
+#   2. mkdir -p /home/ubuntu/ExternalFactor/output      (ไม่มีโฟลเดอร์ = เขียน log ไม่ได้)
+#   3. docker compose up -d                             (container ต้องรันอยู่ ไม่งั้น exec ไม่ได้)
+
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+CRON_TZ=Asia/Bangkok
+
+# ── รายวัน (ช่วงตี 1) ────────────────────────────────────────
+# ราคาน้ำมันประกาศเช้าตรู่ — ดึงตอนตี 1 หลังประกาศแล้ว
+0  1 * * *  cd /home/ubuntu/ExternalFactor && docker compose exec -T api python jobs.py energy       >> output/cron_energy.log 2>&1
+
+# ปฏิทินจีน — ต้องมีข้อมูลก่อนร้านเปิด
+15 1 * * *  cd /home/ubuntu/ExternalFactor && docker compose exec -T api python jobs.py myth         >> output/cron_myth.log 2>&1
+
+# ราคาวัตถุดิบ DIT — ดึงย้อนหลัง 7 วันกันวันที่ประกาศช้า/วันหยุดไม่มีประกาศ
+30 1 * * *  cd /home/ubuntu/ExternalFactor && docker compose exec -T api python jobs.py food_price --days 7 >> output/cron_food_price.log 2>&1
+
+# ── รายสัปดาห์ (จันทร์) ──────────────────────────────────────
+# อัตราแลกเปลี่ยน + เงินเฟ้อ
+0  2 * * 1  cd /home/ubuntu/ExternalFactor && docker compose exec -T api python jobs.py economic     >> output/cron_economic.log 2>&1
+
+# ── รายเดือน (วันที่ 1) ──────────────────────────────────────
+# ค่าไฟ/ค่าแรง เปลี่ยนปีละไม่กี่ครั้ง
+0  3 1 * *  cd /home/ubuntu/ExternalFactor && docker compose exec -T api python jobs.py electricity  >> output/cron_electricity.log 2>&1
+15 3 1 * *  cd /home/ubuntu/ExternalFactor && docker compose exec -T api python jobs.py wage         >> output/cron_wage.log 2>&1
+
+# ── ทุกครึ่งปี (1 ม.ค. และ 1 ก.ค.) ───────────────────────────
+0  4 1 1,7 *  cd /home/ubuntu/ExternalFactor && docker compose exec -T api python jobs.py lucky_shirt  >> output/cron_lucky_shirt.log 2>&1
+
+# วันหยุด/เทศกาล
+# ⚠️ วันหยุดพิเศษที่ ครม.ประกาศแทรกกลางปีจะไม่เข้าระบบจนถึงรอบถัดไป
+#    ถ้าต้องการให้ทัน รันมือ: docker compose exec api python jobs.py holiday
+15 4 1 1,7 *  cd /home/ubuntu/ExternalFactor && docker compose exec -T api python jobs.py holiday      >> output/cron_holiday.log 2>&1
+
+# ── หมายเหตุ: งานที่ "ไม่มี" ใน cron โดยตั้งใจ ────────────────
+# weather / air-quality / disaster — endpoint ยิงเองเมื่อข้อมูลเก่าเกิน TTL
+# sales / sale-forecast — ยิงสดทุก request ไม่มี cache

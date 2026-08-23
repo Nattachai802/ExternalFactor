@@ -4,9 +4,10 @@
 ที่ต่างจาก shell ปกติมาก (ไม่มี PATH เต็ม ไม่มี virtualenv activate ไม่มี cwd)
 สคริปต์นี้จำลองสภาพนั้นให้เจอปัญหาตั้งแต่ก่อน deploy
 
-    python check_cron.py           # ตรวจ syntax + เวลาที่จะรัน + ความถูกต้องของคำสั่ง
-    python check_cron.py --run     # รันทุก job จริงด้วย environment เปล่าแบบ cron (ใช้เวลานาน)
-    python check_cron.py --run energy myth   # รันเฉพาะ job ที่ระบุ
+    python check_cron.py                      # ตรวจ crontab.txt (เครื่อง dev)
+    python check_cron.py crontab.ec2.txt      # ตรวจไฟล์อื่น เช่นของ EC2
+    python check_cron.py --run                # รันทุก job จริงด้วย environment เปล่าแบบ cron
+    python check_cron.py --run energy myth    # รันเฉพาะ job ที่ระบุ
 
 ⚠️ --run เขียนลง DB จริง (upsert ทับตาม PK ไม่สร้างแถวซ้ำ) — รันบนเครื่อง dev เท่านั้น
 """
@@ -168,9 +169,19 @@ def run_isolated(command: str, env_vars: dict) -> tuple[int, str]:
 
 
 def main() -> int:
+    global CRONTAB
     args = sys.argv[1:]
     do_run = "--run" in args
-    only = [a for a in args if not a.startswith("--")]
+    positional = [a for a in args if not a.startswith("--")]
+
+    # arg แรกที่ลงท้าย .txt ถือเป็นไฟล์ crontab ที่เหลือคือชื่อ job ที่จะรัน
+    if positional and positional[0].endswith(".txt"):
+        CRONTAB = os.path.abspath(positional.pop(0))
+    only = positional
+
+    if not os.path.exists(CRONTAB):
+        print(f"❌ ไม่พบไฟล์: {CRONTAB}")
+        return 1
 
     jobs, env_vars = parse_crontab(CRONTAB)
     now = datetime.now(TH_TZ)
