@@ -5,3 +5,5 @@ python-dotenv==1.2.2
 requests==2.33.1
 beautifulsoup4==4.14.3
 feedparser==6.0.12
+icalendar==7.0.3
+
