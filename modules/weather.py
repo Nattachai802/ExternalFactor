@@ -36,7 +36,8 @@ def _get(path: str, lat: float, lon: float, **params) -> dict:
     if not key:
         raise RuntimeError("ไม่พบ OPENWEATHER_API_KEY ใน environment")
     r = requests.get(f"{BASE}/{path}",
-                     params={"lat": lat, "lon": lon, "units": "metric", "appid": key, **params},
+                     params={"lat": lat, "lon": lon, "units": "metric", "lang": "th",
+                             "appid": key, **params},
                      timeout=20)
     r.raise_for_status()
     return r.json()
