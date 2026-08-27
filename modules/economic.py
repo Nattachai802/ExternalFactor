@@ -15,10 +15,19 @@
 """
 import os
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 
 import requests
 from bs4 import BeautifulSoup
+
+# ไม่พึ่ง date.today() ตรงๆ — container รัน UTC เสมอไม่ว่า host จะตั้ง timezone ไว้ยังไง
+# ช่วงตี 1-7 ไทย (=18:00-00:00 UTC ของเมื่อวาน) date.today() แบบ UTC จะได้วันก่อนหน้าเสมอ
+TH_TZ = timezone(timedelta(hours=7))
+
+
+def _th_today() -> date:
+    return datetime.now(TH_TZ).date()
+
 
 OXR_URL = "https://openexchangerates.org/api/latest.json"
 WB_URL = "http://api.worldbank.org/v2/country/tha/indicator/FP.CPI.TOTL.ZG?format=json"
@@ -138,7 +147,7 @@ def fetch_inflation() -> list[dict]:
 
 def run(target_date: date | None = None, verbose: bool = True) -> list[dict]:
     """แถว fact_daily — 1 แถวต่อ 1 สกุลเงิน + เงินเฟ้อปีล่าสุด"""
-    d = (target_date or date.today()).isoformat()
+    d = (target_date or _th_today()).isoformat()
     rows = []
 
     if verbose:
@@ -212,7 +221,7 @@ def format_rows(rows: list[dict], as_of: str) -> dict:
 
 def summary(target_date: date | None = None) -> dict:
     """อัตราแลกเปลี่ยน + เงินเฟ้อ — scrape สด (ใช้จาก cron เท่านั้น API ต้อง query DB แทน)"""
-    d = target_date or date.today()
+    d = target_date or _th_today()
     return format_rows(run(d, verbose=False), d.isoformat())
 
 

@@ -20,6 +20,7 @@ services:
     restart: unless-stopped
     logging: *default-logging
     environment:
+      TZ: Asia/Bangkok   # log ของ postgres เอง (ไม่กระทบ TIMESTAMPTZ ที่เก็บถูกต้องอยู่แล้ว)
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: exfactor
@@ -37,7 +38,9 @@ services:
     build: .
     restart: unless-stopped
     logging: *default-logging
-    env_file: .env
+    environment:
+      TZ: Asia/Bangkok   # ซ้ำกับ ENV ใน Dockerfile ไว้ตั้งใจ — เผื่อ deploy ด้วย image สำเร็จรูป
+    env_file: .env       # ที่ไม่ได้ build ใหม่ ยัง override ได้จากชั้นนี้
     ports:
       - "8000:8000"
     depends_on:

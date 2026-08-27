@@ -5,6 +5,17 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
+# python:3.13-slim ตั้งต้นเป็น UTC เสมอ ไม่รับ timezone จาก host แม้ host จะตั้ง
+# Asia/Bangkok ไว้แล้วก็ตาม (container คนละ namespace) — date.today()/datetime.now()
+# ที่ไม่ระบุ timezone จะได้วันที่/เวลา UTC ผิดจากไทยอยู่ 7 ชม. เสมอ (เจอจริงจาก fact_daily
+# ที่ถูก tag วันที่ผิดไปหนึ่งวันตอนรัน cron ช่วงตี 1-7 เวลาไทย)
+# ติดตั้ง tzdata + ตั้ง TZ ให้ตรงตั้งแต่ระดับ OS ในเลเยอร์นี้ ก่อน apt cache หมดอายุ
+RUN apt-get update && apt-get install -y --no-install-recommends tzdata && \
+    ln -snf /usr/share/zoneinfo/Asia/Bangkok /etc/localtime && \
+    echo "Asia/Bangkok" > /etc/timezone && \
+    rm -rf /var/lib/apt/lists/*
+ENV TZ=Asia/Bangkok
+
 # แยก layer requirements ออกจาก code — code เปลี่ยนบ่อยกว่า dependency มาก
 # แก้แค่ app_v1.py ก็ไม่ต้องโหลด pip ใหม่ทุกครั้ง
 COPY requirements.txt .

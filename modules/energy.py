@@ -1,8 +1,18 @@
 import re
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 import requests
 from bs4 import BeautifulSoup
+
+# ไม่พึ่ง date.today() ตรงๆ — container รัน UTC เสมอไม่ว่า host จะตั้ง timezone ไว้ยังไง
+# ช่วงตี 1-7 ไทย (=18:00-00:00 UTC ของเมื่อวาน) date.today() แบบ UTC จะได้วันก่อนหน้าเสมอ
+# ทำให้ cron ที่ยิงตรงเวลาไทย ดันบันทึกแถวผิดวันที่ (เจอจริงจาก fact_daily)
+TH_TZ = timezone(timedelta(hours=7))
+
+
+def _th_today() -> date:
+    return datetime.now(TH_TZ).date()
+
 
 from modules import pttor
 
@@ -93,7 +103,7 @@ def run(target_date: date | None = None, verbose: bool = True) -> list[dict]:
 
     ราคาเป็นค่า ณ วันที่ดึง — เว็บต้นทางไม่ระบุวันที่ของราคาน้ำมัน
     """
-    d = (target_date or date.today()).isoformat()
+    d = (target_date or _th_today()).isoformat()
     rows = []
 
     if verbose:
@@ -189,7 +199,7 @@ def format_rows(rows: list[dict], as_of: str, prev_rows: list[dict] | None = Non
 
 def summary(target_date: date | None = None) -> dict:
     """ราคาน้ำมัน/แก๊ส — scrape สด (ใช้จาก cron เท่านั้น API ต้อง query DB แทน)"""
-    d = target_date or date.today()
+    d = target_date or _th_today()
     return format_rows(run(d, verbose=False), d.isoformat())
 
 

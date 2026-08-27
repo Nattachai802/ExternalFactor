@@ -14,9 +14,19 @@
 ⚠️ อัตราในหน้านี้เป็น "อัตราฐาน" ค่าไฟจริง = ฐาน + Ft + ค่าบริการ + VAT 7%
 """
 import re
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 import requests
+
+# ไม่พึ่ง date.today() ตรงๆ — container รัน UTC เสมอไม่ว่า host จะตั้ง timezone ไว้ยังไง
+# ช่วงตี 1-7 ไทย (=18:00-00:00 UTC ของเมื่อวาน) date.today() แบบ UTC จะได้วันก่อนหน้าเสมอ
+TH_TZ = timezone(timedelta(hours=7))
+
+
+def _th_today() -> date:
+    return datetime.now(TH_TZ).date()
+
+
 from bs4 import BeautifulSoup
 
 BASE = "https://www.mea.or.th"
@@ -161,7 +171,7 @@ def fetch_type(path: str) -> tuple[str, list[dict]]:
 def run(only_type: int | None = None, target_date: date | None = None,
         verbose: bool = True) -> list[dict]:
     """คืนแถว fact_daily ของอัตราค่าไฟทุกประเภท (หรือเฉพาะประเภทที่ระบุ)"""
-    d = (target_date or date.today()).isoformat()
+    d = (target_date or _th_today()).isoformat()
 
     index = requests.get(BASE + INDEX_PATH, headers=UA, timeout=20)
     index.raise_for_status()
@@ -256,7 +266,7 @@ def format_rows(rows: list[dict], as_of: str, detailed: bool = False) -> dict:
 
 def summary(only_type: int | None = None, target_date: date | None = None) -> dict:
     """อัตราค่าไฟ — scrape สด (ใช้จาก cron เท่านั้น API ต้อง query DB แทน)"""
-    d = target_date or date.today()
+    d = target_date or _th_today()
     return format_rows(run(only_type=only_type, target_date=d, verbose=False), d.isoformat())
 
 
