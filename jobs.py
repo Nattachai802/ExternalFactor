@@ -21,6 +21,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import db
+import modules.air_quality
+import modules.disaster
 import modules.economic
 import modules.electricity
 import modules.energy
@@ -31,7 +33,36 @@ import modules.myth
 import modules.wage
 import modules.weather
 
+# ต้องตรงกับ DEFAULT_PROVINCE/DEFAULT_DISTRICT/DEFAULT_LAT/DEFAULT_LON ใน app_v1.py เป๊ะ
+# (ไม่ import จาก app_v1 ตรงๆ เพราะลากพา FastAPI เข้ามาด้วย ทำ cron job ช้าขึ้นเปล่าๆ)
+WARM_PROVINCE, WARM_DISTRICT = "Bangkok", "Chatuchak District"
+WARM_LAT, WARM_LON = 13.8479, 100.5697   # เสนานิคม
+
+
+def warm_cache(verbose: bool = True) -> int:
+    """อุ่น cache ของพื้นที่ fallback (กทม.) ล่วงหน้า — สาขาที่ยังไม่ตั้งพิกัด/หาเขตไม่เจอ
+    ตกมาใช้พื้นที่นี้เสมอ (ดู resolve_area ใน app_v1.py) ถ้าไม่มีใครเคยเรียกมาก่อนเลย
+    คนแรกจะเจอ 503 ตอน OWM/GISTDA/GDACS ช้าหรือล่มพอดี — อุ่นไว้ก่อนกันเคสนี้
+
+    เรียก get() ของแต่ละโมดูลตรงๆ ไม่ใช่ยิง OWM เอง — get() เช็ค TTL ในตัวอยู่แล้ว
+    รัน cron ถี่แค่ไหนก็ไม่เปลืองโควตา เพราะยิงจริงเฉพาะตอน cache หมดอายุเท่านั้น
+    """
+    written = 0
+    for label, get_fn in (
+        ("weather", lambda: modules.weather.get(WARM_PROVINCE, WARM_DISTRICT, WARM_LAT, WARM_LON)[2]),
+        ("air_quality", lambda: modules.air_quality.get(WARM_PROVINCE, WARM_DISTRICT, WARM_LAT, WARM_LON)[1]),
+        ("disaster", lambda: modules.disaster.get(WARM_PROVINCE, WARM_DISTRICT, WARM_LAT, WARM_LON)[1]),
+    ):
+        to_save = get_fn()
+        for table, rows in to_save:
+            written += db.save_rows(table, rows)
+        if verbose:
+            print(f"  {label}: {'อุ่นใหม่' if to_save else 'ยังไม่หมดอายุ ข้าม'}")
+    return written
+
+
 # ชื่องาน → (ตารางปลายทาง, ฟังก์ชันที่คืนแถว)
+# table = None แปลว่า fn เขียน DB เองแล้วคืนจำนวนแถวที่เขียน (ไม่ใช่ list ให้ไปเขียนต่อ)
 JOBS = {
     "energy":      ("fact_daily",         modules.energy.run),
     "electricity": ("fact_daily",         modules.electricity.run),
@@ -41,8 +72,7 @@ JOBS = {
     "holiday":     ("fact_event",         modules.holiday.run),
     "wage":        ("fact_minimum_wage",  modules.wage.run),
     "food_price":  ("fact_dit_price",     modules.food_price.run),
-    # ponytail: weather ไม่มีงาน cron — endpoint ยิงเองตอน cache หมดอายุ
-    #           เพิ่มงานอุ่น cache ทีหลังถ้า user คนแรกของวันรอนานเกินรับได้
+    "warm_cache":  (None,                 warm_cache),
 }
 
 
@@ -83,14 +113,14 @@ def run_job(name: str, **kwargs) -> int:
 
     table, fn = JOBS[name]
     started = datetime.now(timezone.utc)
-    print(f"[{started.astimezone():%Y-%m-%d %H:%M:%S}] {name} → {table}")
+    print(f"[{started.astimezone():%Y-%m-%d %H:%M:%S}] {name} → {table or '(อุ่น cache หลายตาราง)'}")
 
     used = 0
     try:
         for attempt in range(1, ATTEMPTS + 1):
             used = attempt
             try:
-                rows = fn(verbose=False, **kwargs)
+                result = fn(verbose=False, **kwargs)
                 break
             except Exception as e:
                 if attempt == ATTEMPTS:
@@ -99,7 +129,8 @@ def run_job(name: str, **kwargs) -> int:
                       f"— รอ {RETRY_WAIT} วิแล้วลองใหม่")
                 time.sleep(RETRY_WAIT)
 
-        written = db.save_rows(table, rows)
+        # table=None: fn เขียน DB เองแล้ว (หลายตาราง) คืนจำนวนแถวมาตรงๆ — ไม่ต้องเขียนซ้ำ
+        written = result if table is None else db.save_rows(table, result)
 
         # ราคาต้องเทียบกับแถวก่อนหน้าที่อยู่ใน DB — คำนวณหลังเขียนเสร็จเท่านั้น
         if name == "food_price":

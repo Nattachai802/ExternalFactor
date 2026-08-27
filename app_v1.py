@@ -89,8 +89,9 @@ def resolve_owner(branch_id: str, owner_id: str | None = None) -> str:
 
 # สาขาไม่จำเป็นต้องกรอกพิกัด/ที่อยู่ตอนสร้าง — ร้านใหม่จำนวนมากจึงมี lat/lon = 0
 # ตอบข้อมูลของ กทม.ไปก่อนดีกว่า 404 เปล่าๆ (ผู้ใช้ส่วนใหญ่อยู่ กทม.)
-DEFAULT_LAT, DEFAULT_LON = 13.7563, 100.5018       # ศาลาว่าการ กทม.
-DEFAULT_PROVINCE, DEFAULT_DISTRICT = "Bangkok", "Phra Nakhon District"
+DEFAULT_LAT, DEFAULT_LON = 13.8479, 100.5697       # เสนานิคม กรุงเทพฯ — ตรงกับ default ของ
+                                                    # modules/weather.py, air_quality.py, disaster.py
+DEFAULT_PROVINCE, DEFAULT_DISTRICT = "Bangkok", "Chatuchak District"
 
 
 def resolve_area(branch_id: str) -> tuple[dict, dict, bool]:

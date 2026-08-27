@@ -49,6 +49,13 @@ CRON_TZ=Asia/Bangkok
 #    ถ้าต้องการให้ทัน รันมือ: docker compose exec api python jobs.py holiday
 15 4 1 1,7 *  cd /home/ubuntu/ExternalFactor && docker compose exec -T api python jobs.py holiday      >> output/cron_holiday.log 2>&1
 
+# ── ทุก 20 นาที ───────────────────────────────────────────────
+# อุ่น cache ของพื้นที่ fallback (กทม.) ล่วงหน้า — สาขาที่ยังไม่ตั้งพิกัด/หาเขตไม่เจอ
+# ตกมาใช้พื้นที่นี้เสมอ ไม่ต้องรอเจอ 503 ก่อนถึงจะมีข้อมูล
+# ยิงถี่ได้โดยไม่เปลืองโควตา เพราะ get() เช็ค TTL เอง ข้ามการยิงจริงถ้ายังไม่หมดอายุ
+# (เผื่อ disaster TTL 30 นาที ซึ่งสั้นสุดในระบบ — 20 นาทีให้ทันเสมอ)
+*/20 * * * *  cd /home/ubuntu/ExternalFactor && docker compose exec -T api python jobs.py warm_cache   >> output/cron_warm_cache.log 2>&1
+
 # ── หมายเหตุ: งานที่ "ไม่มี" ใน cron โดยตั้งใจ ────────────────
-# weather / air-quality / disaster — endpoint ยิงเองเมื่อข้อมูลเก่าเกิน TTL
+# weather / air-quality / disaster ของสาขาอื่นนอกเหนือพื้นที่ fallback — endpoint ยิงเองเมื่อข้อมูลเก่าเกิน TTL
 # sales / sale-forecast — ยิงสดทุก request ไม่มี cache
