@@ -81,6 +81,17 @@ def parse_thai_date(text: str) -> str | None:
     return f"{int(year_be) - 543:04d}-{month:02d}-{int(day):02d}"
 
 
+def parse_unit(html: str) -> str:
+    """หน่วยของสินค้าจากหัวตาราง — '...สุกรชำแหละ เนื้อสามชั้น บาท/กก.' → 'บาท/กก.'
+
+    DIT ไม่ส่งหน่วยมาใน JSON catalog มีแค่ในหน้าราคา และหน่วยไม่เท่ากันทุกสินค้า
+    (บาท/กก. บาท/ฟอง บาท/ขวด ...) อ่านไม่ออกก็คืน 'บาท' แบบเดิม ไม่ทำให้ scrape ล้ม
+    """
+    h2 = BeautifulSoup(html, "html.parser").find("h2")
+    tail = h2.get_text(" ", strip=True).split()[-1] if h2 else ""
+    return tail if tail.startswith("บาท") else "บาท"
+
+
 def _split_range(range_str: str) -> tuple[float | None, float | None]:
     parts = [p.strip().replace(",", "") for p in range_str.split("-")]
     try:
@@ -105,6 +116,7 @@ def fetch_product_history(product: dict, protype: str, day1: date, day2: date) -
                          data=payload, headers=UA, timeout=15)
     resp.raise_for_status()
 
+    unit = parse_unit(resp.text)
     rows = []
     for r in parse_price_table(resp.text):
         iso_date = parse_thai_date(r["date_th"])
@@ -115,7 +127,7 @@ def fetch_product_history(product: dict, protype: str, day1: date, day2: date) -
             "date": iso_date, "protype": PROTYPE_LABEL[protype],
             "category": product["group_name"], "product_name": product["product_name"],
             "price_min": price_min, "price_max": price_max, "price_avg": r["avg"],
-            "unit": "บาท", "source": SOURCE,
+            "unit": unit, "source": SOURCE,
         })
     return rows
 
@@ -246,7 +258,13 @@ def demo():
     assert _split_range("") == (None, None)
     assert _split_range("พัง") == (None, None)
 
-    assert parse_price_table("<p>ไม่มีตาราง</p>") == [], "เว็บเปลี่ยนโครงต้องคืนว่าง ไม่ raise (สินค้าบางตัวไม่มีราคาจริงๆ)"
+    H2 = '<h2>ประเภท <span>: ขายปลีก</span> สินค้า <span>: เนื้อสัตว์&nbsp;&nbsp;สุกรชำแหละ เนื้อสามชั้น บาท/กก.</span></h2>'
+    assert parse_unit(H2) == "บาท/กก."
+    assert parse_unit(H2.replace("บาท/กก.", "บาท/ฟอง")) == "บาท/ฟอง"
+    assert parse_unit("<p>ไม่มีหัวตาราง</p>") == "บาท", "อ่านหน่วยไม่ออกต้องคืน 'บาท' ไม่ใช่พัง"
+    assert parse_unit("<h2>สินค้า ไม่มีหน่วยต่อท้าย</h2>") == "บาท"
+
+    assert parse_price_table("<p>ไม่มีตาราง</p>") == [],"เว็บเปลี่ยนโครงต้องคืนว่าง ไม่ raise (สินค้าบางตัวไม่มีราคาจริงๆ)"
 
     print("✅ ผ่าน — ข้ามแถวไม่มีราคา/แถวสรุป, แยกช่วงราคา, กันเว็บเปลี่ยนโครง")
 

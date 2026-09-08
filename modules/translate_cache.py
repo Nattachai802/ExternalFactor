@@ -78,8 +78,8 @@ def _key(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:32]
 
 
-def call_openrouter(text: str, timeout: int = 60) -> str:
-    """ยิง OpenRouter 1 ครั้ง — คืนคำแปล (raise ถ้าพัง ให้ผู้เรียกจัดการ)"""
+def chat(prompt: str, timeout: int = 60) -> str:
+    """ยิง OpenRouter ด้วย prompt เต็ม 1 ครั้ง (raise ถ้าพัง ให้ผู้เรียกจัดการ)"""
     key = _api_key()
     if not key:
         raise RuntimeError("ไม่พบ OPEN_ROUTER_API_KEY ใน environment")
@@ -87,14 +87,50 @@ def call_openrouter(text: str, timeout: int = 60) -> str:
     resp = requests.post(
         API_URL,
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-        json={
-            "model": _model(),
-            "messages": [{"role": "user", "content": PROMPT.format(text=text)}],
-        },
+        json={"model": _model(), "messages": [{"role": "user", "content": prompt}]},
         timeout=timeout,
     )
     resp.raise_for_status()
     return _clean(resp.json()["choices"][0]["message"]["content"])
+
+
+def call_openrouter(text: str, timeout: int = 60) -> str:
+    """ยิง OpenRouter 1 ครั้ง — คืนคำแปล (raise ถ้าพัง ให้ผู้เรียกจัดการ)"""
+    return chat(PROMPT.format(text=text), timeout)
+
+
+def cached_ask(prompt: str, asker=None) -> str:
+    """ถาม LLM ด้วย prompt เต็ม — cache ด้วย hash ของ prompt เอง
+
+    ใช้ตาราง cache ตัวเดียวกับคำแปล (key คนละ hash อยู่แล้ว ไม่ชนกัน)
+    คืน "" ถ้ายิงไม่สำเร็จ — ผู้เรียกตัดสินใจ fallback เอง
+    """
+    fn = asker or chat
+    cache_key = _key(prompt)
+    conn = _conn()
+    try:
+        hit = conn.execute(
+            "SELECT translated_text FROM translation_cache WHERE key = ?", (cache_key,)
+        ).fetchone()
+        if hit:
+            return _clean(hit[0])
+
+        try:
+            answer = _clean(fn(prompt) or "")
+        except Exception as e:
+            print(f"  ⚠️  ถาม LLM ไม่สำเร็จ ({e})")
+            return ""
+
+        if answer:
+            conn.execute(
+                "INSERT OR REPLACE INTO translation_cache (key, source_text, translated_text, model)"
+                " VALUES (?, ?, ?, ?)",
+                (cache_key, prompt, answer, _model()),
+            )
+            conn.commit()
+        return answer
+    finally:
+        conn.close()
 
 
 def translate_text(text: str, translator=None) -> str:

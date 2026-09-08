@@ -20,6 +20,7 @@ import db
 import modules.air_quality
 import modules.badge
 import modules.branch
+import modules.cost_watch
 import modules.disaster
 import modules.economic
 import modules.electricity
@@ -30,8 +31,10 @@ import modules.lucky_shirt
 import modules.myth
 import modules.sale_forecast
 import modules.sales
+import modules.sales_forecast_card
 import modules.wage
 import modules.weather
+import modules.weather_card
 
 app = FastAPI(title="exFactor API v1", version="1.0.0",
               description="ข้อมูลปัจจัยภายนอกสำหรับร้านอาหาร — ปฏิทินจีน วันหยุด พลังงาน ค่าไฟ ค่าแรง เศรษฐกิจ ราคาวัตถุดิบ สภาพอากาศ")
@@ -44,10 +47,16 @@ def _parse_date(s: str | None) -> tuple[_date | None, str | None]:
     """
     if not s:
         return None, None
+    # unix time string — frontend ส่งเวลามาแบบนี้ ตีความตามเวลาไทยเพราะข้อมูลทั้งระบบอิง TH
+    if s.strip().lstrip("-").isdigit():
+        try:
+            return datetime.fromtimestamp(int(s.strip()), TH_TZ).date(), None
+        except (ValueError, OSError, OverflowError):
+            return None, f"unix time '{s}' ไม่ถูกต้อง — แสดงข้อมูลล่าสุดแทน"
     try:
         return datetime.strptime(s, "%Y-%m-%d").date(), None
     except ValueError:
-        return None, f"รูปแบบวันที่ '{s}' ไม่ถูกต้อง (ต้องเป็น YYYY-MM-DD) — แสดงข้อมูลล่าสุดแทน"
+        return None, f"รูปแบบวันที่ '{s}' ไม่ถูกต้อง (ต้องเป็น YYYY-MM-DD หรือ unix time) — แสดงข้อมูลล่าสุดแทน"
 
 
 def _with_warning(result: dict, warning: str | None) -> dict:
@@ -215,6 +224,35 @@ def get_myth(
         warning = (warning + " " if warning else "") + \
                  f"ไม่มีข้อมูลของวันที่ {d.isoformat()} — แสดงข้อมูลล่าสุด ({actual_date}) แทน"
     return _with_warning(result, warning)
+
+
+
+@app.get("/api/v1/astrology", summary="การ์ดดวงชะตาประจำวัน (ปีนักษัตร/กิจกรรมแนะนำ/สีมงคล/ทิศมงคล)")
+def get_astrology(
+    date: str | None = Query(None, description="วันที่ต้องการ — YYYY-MM-DD หรือ unix time (วินาที) — ไม่ระบุ = วันล่าสุดในระบบ",
+                             examples=["2026-09-08", "1757260800"]),
+):
+    d, warning = _parse_date(date)
+
+    rows, actual_date = db.latest_snapshot("fact_myth", "date", d)
+    if not actual_date:
+        raise HTTPException(status_code=404, detail="ยังไม่มีข้อมูลปฏิทินจีนใน DB เลย")
+
+    # สีมงคลผูกวันในสัปดาห์ ไม่ใช่วันที่ — ยึดวันของข้อมูลที่ได้จริง ไม่ใช่วันที่ผู้ใช้ขอ
+    weekday = modules.lucky_shirt.weekday_th(_date.fromisoformat(actual_date))
+    color_rows = db.query(
+        "SELECT color_th, hex FROM dim_lucky_shirt WHERE weekday = %s AND category = %s",
+        (weekday, "โชคลาภ"),
+    )
+    colors = [{"name": r["color_th"], "hex": r["hex"] or ""} for r in color_rows]
+
+    result = modules.myth.format_astrology(rows, actual_date, colors)
+    if d and actual_date != d.isoformat():
+        warning = (warning + " " if warning else "") + \
+                 f"ไม่มีข้อมูลของวันที่ {d.isoformat()} — แสดงข้อมูลล่าสุด ({actual_date}) แทน"
+    # endpoint ใหม่ใช้ key อังกฤษล้วน — ไม่ผ่าน _with_warning ที่ใส่ "คำเตือน" ให้
+    result["warning"] = warning or ""
+    return result
 
 
 # ── สีเสื้อมงคล ──────────────────────────────────────────────
@@ -454,6 +492,80 @@ def get_food_price(
     return _with_warning(result, warning)
 
 
+# ── ต้นทุนและพลังงาน (ST-01 / ST-04) ─────────────────────────
+# รวม 2 ตาราง (fact_dit_price ขายปลีก + fact_daily น้ำมัน/แก๊ส) เป็น array แบนอันเดียว
+# ยิงครั้งเดียวได้ทั้งการ์ดหน้าแรกและหน้ารายการเต็ม — /api/v1/food-price เดิมยังอยู่
+ENERGY_SOURCES = ("Kapook%", "EPPO%")
+ENERGY_WHERE = "(source LIKE %s OR source LIKE %s)"
+
+
+@app.get("/api/v1/cost-watch", summary="ราคาวัตถุดิบ (DIT ขายปลีก) + น้ำมัน/แก๊ส ทั้งหมดใน array เดียว")
+def get_cost_watch(
+    date: str | None = Query(None, description="วันที่ต้องการ — YYYY-MM-DD หรือ unix time (วินาที) — ไม่ระบุ = วันล่าสุดในระบบ",
+                             examples=["2026-09-08", "1757260800"]),
+):
+    d, warning = _parse_date(date)
+
+    # 2 ตารางอัปเดตคนละรอบ cron — หาวันล่าสุดของแต่ละตารางแยกกัน ไม่บังคับให้ตรงกัน
+    # ไม่คัดสินค้า: ส่ง DIT ขายปลีกทั้งหมด + พลังงานทั้งหมด ให้หน้าบ้านเลือกเอง
+    dit_rows, _ = db.latest_snapshot(
+        "fact_dit_price", "date", d, where="protype = %s", params=("ขายปลีก",),
+    )
+    daily_rows, daily_date = db.latest_snapshot(
+        "fact_daily", "date", d, where=ENERGY_WHERE, params=ENERGY_SOURCES,
+    )
+
+    if not dit_rows and not daily_rows:
+        raise HTTPException(status_code=404, detail="ยังไม่มีข้อมูลราคาวัตถุดิบ/พลังงานใน DB เลย")
+
+    # ส่วนต่างของน้ำมัน/แก๊สคิดสดเทียบ "วันก่อนหน้าที่มีข้อมูลจริง" (DIT มี price_change ให้แล้ว)
+    prev_daily = []
+    if daily_date:
+        prev_date = db.max_date(
+            "fact_daily", "date",
+            on_or_before=_date.fromisoformat(daily_date) - timedelta(days=1),
+            where=ENERGY_WHERE, params=ENERGY_SOURCES)
+        if prev_date:
+            prev_daily = db.rows_between("fact_daily", "date", prev_date, prev_date,
+                                         where=ENERGY_WHERE, params=ENERGY_SOURCES)
+
+    fetched = [r["fetched_at"] for r in (*dit_rows, *daily_rows) if r.get("fetched_at")]
+    updated_at = max(fetched).astimezone(TH_TZ).isoformat() if fetched else ""
+
+    result = modules.cost_watch.build(dit_rows, daily_rows, prev_daily, updated_at)
+    result["warning"] = warning or ""
+    return result
+
+
+# ── การ์ดเฉลี่ยการเปลี่ยนแปลงราคา (ST-01) ────────────────────
+# ป้าย % ใบเดียว — แยก endpoint จาก /cost-watch เพราะอยู่คนละการ์ด หน้าบ้านโหลดแยกได้
+@app.get("/api/v1/price-change-summary", summary="เฉลี่ย % การเปลี่ยนแปลงราคาวัตถุดิบ (DIT ขายปลีก)")
+def get_price_change_summary(
+    date: str | None = Query(None, description="วันที่ต้องการ — YYYY-MM-DD หรือ unix time (วินาที) — ไม่ระบุ = วันล่าสุดในระบบ",
+                             examples=["2026-09-08", "1757260800"]),
+):
+    d, warning = _parse_date(date)
+
+    rows, actual_date = db.latest_snapshot(
+        "fact_dit_price", "date", d, where="protype = %s", params=("ขายปลีก",),
+    )
+    if not actual_date:
+        raise HTTPException(status_code=404, detail="ยังไม่มีข้อมูลราคาวัตถุดิบใน DB เลย")
+
+    # price_change ที่ cron คำนวณไว้เทียบ "แถวก่อนหน้าของสินค้านั้น" ซึ่งแต่ละตัวอาจคนละวัน
+    # ป้ายจึงบอกได้แค่วันประกาศก่อนหน้าของทั้งชุด — ใกล้เคียงพอสำหรับข้อความบนการ์ด
+    anchor = _date.fromisoformat(actual_date)
+    prev_date = db.max_date("fact_dit_price", "date", on_or_before=anchor - timedelta(days=1),
+                            where="protype = %s", params=("ขายปลีก",))
+
+    result = modules.cost_watch.summarize_change(rows, modules.cost_watch.compare_label(anchor, prev_date))
+    if d and actual_date != d.isoformat():
+        warning = (warning + " " if warning else "") + \
+                 f"ไม่มีข้อมูลของวันที่ {d.isoformat()} — แสดงข้อมูลล่าสุด ({actual_date}) แทน"
+    result["warning"] = warning or ""
+    return result
+
+
 # ── สภาพอากาศ ────────────────────────────────────────────────
 # ต่างจาก endpoint อื่นตรงที่ยิง API สดได้ (ไม่มี cron) — DB เป็น cache ระดับเขต
 # ยังหมดอายุไม่ครบ TTL ก็ตอบจาก DB ล้วน ไม่เปลืองโควตา OWM
@@ -549,6 +661,48 @@ def get_weather_badge(branch_id: str, background_tasks: BackgroundTasks):
     return _with_warning(result, default_area_warning(branch_id) if is_default else None)
 
 
+# ── การ์ดอากาศด้านบน (ST-01) ─────────────────────────────────
+# รวม weather + air_quality + disaster + badge ไว้ในเส้นเดียว — cache เดียวกับ /weather
+# ไม่ยิง OWM ซ้ำถ้ายังไม่หมด TTL (get() อ่าน DB ก่อนเสมอ)
+@app.get("/api/v1/weather-hero/{branch_id}", summary="การ์ดอากาศด้านบน — ป้ายเตือน + ปัจจุบัน + ฝุ่น + 10 วัน")
+def get_weather_hero(branch_id: str, background_tasks: BackgroundTasks):
+    loc, area, is_default = resolve_area(branch_id)
+
+    try:
+        hourly, daily, weather_save = modules.weather.get(area["province"], area["district"],
+                                                          loc["lat"], loc["lon"])
+    except Exception:
+        raise HTTPException(status_code=503, detail="ระบบพยากรณ์อากาศ (OWM) ขัดข้อง — กรุณาลองใหม่ภายหลัง")
+
+    # ฝุ่น/ภัยพิบัติล่มไม่ควรทำให้การ์ดทั้งใบหาย — ฝุ่นเป็น 0, ภัยพิบัติถือว่าไม่มี
+    try:
+        aqi_rows, aqi_save = modules.air_quality.get(area["province"], area["district"],
+                                                     loc["lat"], loc["lon"])
+    except Exception:
+        aqi_rows, aqi_save = [], []
+    try:
+        disaster_rows, disaster_save = modules.disaster.get(area["province"], area["district"],
+                                                           loc["lat"], loc["lon"])
+    except Exception:
+        disaster_rows, disaster_save = [], []
+
+    for table, rows in weather_save + aqi_save + disaster_save:
+        background_tasks.add_task(db.save_rows, table, rows)
+
+    aqi = aqi_rows[0]["aqi_us"] if aqi_rows else None
+    badge = modules.badge.evaluate(
+        hourly[0]["weather_id"] if hourly else None,
+        modules.badge.pop_periods_remaining_today(hourly),
+        daily[0]["temp_max"] if daily else None,
+        aqi,
+        disaster_alert=modules.disaster.has_alert(disaster_rows),
+    )
+
+    result = modules.weather_card.format_card(hourly, daily, aqi, badge)
+    result["warning"] = default_area_warning(branch_id) if is_default else ""
+    return result
+
+
 # ── ยอดขายจริง ───────────────────────────────────────────────
 # ไม่ผ่าน DB เลย — ยอดขายเป็นข้อมูลการเงิน บิลปิดเพิ่มได้ตลอดวัน เสิร์ฟของ cache = รายงานเงินผิด
 # ไม่ต้องใช้พิกัดสาขา ร้านเปิดใหม่ที่ยังไม่ตั้ง lat/lon ก็ยิงได้
@@ -608,6 +762,34 @@ def get_sale_forecast(
                           "sale_forecast": result}, warning)
 
 
+# ── การ์ดพยากรณ์ยอดขาย (ST-01) ───────────────────────────────
+# รวมยอดจริง + ค่าพยากรณ์รายวันของสัปดาห์นี้ไว้ในเส้นเดียว หน้าบ้านวาดกราฟได้เลย
+# ต่างจาก /sales + /sale-forecast เดิมที่ต้องยิง 2 เส้นแล้ว join เอง (และเส้นหลังคืนยอดรวมก้อนเดียว)
+@app.get("/api/v1/sales-forecast/{branch_id}", summary="การ์ดพยากรณ์ยอดขาย — กราฟแท่ง 7 วัน (จ-อา)")
+def get_sales_forecast_card(
+    branch_id: str,
+    owner_id: str | None = Query(None, description="รหัสเจ้าของร้าน — ไม่ระบุ = ระบบหาจาก branch_id ให้"),
+):
+    owner_id = resolve_owner(branch_id, owner_id)
+
+    today = datetime.now(TH_TZ).date()
+    start, end = modules.sales_forecast_card.week_window(today)
+
+    # ยอดจริงมีได้แค่ถึงเมื่อวาน — วันนี้บิลยังปิดไม่ครบ ไม่ต้องไปถาม
+    actual = {}
+    if start < today:
+        try:
+            days = modules.sales.summary(owner_id, branch_id,
+                                         days=(today - start).days, end=today - timedelta(days=1))
+            actual = {d["วันที่"]: d["ยอดขายสุทธิ"] for d in days["รายวัน"]}
+        except Exception:
+            actual = {}          # POS ล่มไม่ควรทำให้กราฟหายทั้งใบ — แท่งยอดจริงเป็น 0 แทน
+
+    forecast = modules.sale_forecast.daily_values(owner_id, branch_id, start, end)
+
+    return modules.sales_forecast_card.format_card(today, actual, forecast)
+
+
 # ── ภัยพิบัติ ────────────────────────────────────────────────
 # แยกเส้นของตัวเอง — badge ใช้แค่ "มี/ไม่มี" แต่เส้นนี้ให้รายละเอียดครบ เอาไปใช้เรื่องอื่นได้
 @app.get("/api/v1/disaster/{branch_id}", summary="ภัยพิบัติใกล้สาขา (GISTDA น้ำท่วม/ไฟป่า + GDACS)")
@@ -630,3 +812,46 @@ def get_disaster(branch_id: str, background_tasks: BackgroundTasks):
         "disaster": modules.disaster.format_rows(rows),
     }
     return _with_warning(result, default_area_warning(branch_id) if is_default else None)
+
+
+
+GLOBAL_MODULES = {
+    # การ์ดดวงชะตาแทนที่ myth ดิบ — /api/v1/myth ยังเปิดอยู่ เรียกตรงได้ถ้าต้องการข้อมูลเต็ม
+    "astrology": lambda: get_astrology(date=None),
+    "lucky_shirt": lambda: get_lucky_shirt(date=None),
+    "holiday": lambda: get_holiday(date=None, month=None, year=None, events_only=False),
+    "energy": lambda: get_energy(date=None),
+    "electricity": lambda: get_electricity(date=None, user_type=None, detailed=False),
+    "economic": lambda: get_economic(date=None, currency=None),
+    "food_price": lambda: get_food_price(date=None, days=1, protype="ขายปลีก", category=None),
+}
+
+# รับ (branch_id, background_tasks) เหมือนกันหมด ตัวไหนไม่ใช้ background_tasks ก็เพิกเฉยไป
+BRANCH_MODULES = {
+    "weather": lambda b, bg: get_weather(b, bg, hours=None),
+    "air_quality": lambda b, bg: get_air_quality(b, bg, hours=None),
+    "weather_badge": lambda b, bg: get_weather_badge(b, bg),
+    "wage": lambda b, bg: get_wage_by_branch(b),
+    "sales": lambda b, bg: get_sales(b, owner_id=None, days=7, date=None),
+    "sale_forecast": lambda b, bg: get_sale_forecast(b, owner_id=None, start=None, end=None),
+    "disaster": lambda b, bg: get_disaster(b, bg),
+}
+
+
+def _safe_call(fn, *args):
+    try:
+        return fn(*args)
+    except HTTPException as e:
+        return {"error": e.detail}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/v1/all", summary="รวมทุกโมดูลที่ไม่ผูกสาขา (myth, holiday, energy, ฯลฯ) ในคำขอเดียว")
+def get_all_global():
+    return {name: _safe_call(fn) for name, fn in GLOBAL_MODULES.items()}
+
+
+@app.get("/api/v1/all/{branch_id}", summary="รวมทุกโมดูลของสาขาเดียวในคำขอเดียว (ไม่รวมโมดูลที่ไม่ผูกสาขา — ดู /api/v1/all)")
+def get_all_branch(branch_id: str, background_tasks: BackgroundTasks):
+    return {name: _safe_call(fn, branch_id, background_tasks) for name, fn in BRANCH_MODULES.items()}

@@ -1,0 +1,1373 @@
+{
+ "openapi": "3.1.0",
+ "info": {
+  "title": "exFactor API v1",
+  "description": "ข้อมูลปัจจัยภายนอกสำหรับร้านอาหาร — ปฏิทินจีน วันหยุด พลังงาน ค่าไฟ ค่าแรง เศรษฐกิจ ราคาวัตถุดิบ สภาพอากาศ",
+  "version": "1.0.0"
+ },
+ "paths": {
+  "/": {
+   "get": {
+    "summary": "Health check",
+    "operationId": "root__get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/health/jobs": {
+   "get": {
+    "summary": "สถานะการรันล่าสุดของ cron job แต่ละตัว",
+    "operationId": "get_job_health_api_v1_health_jobs_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/myth": {
+   "get": {
+    "summary": "ปฏิทินจีน (โหราศาสตร์รายวัน)",
+    "operationId": "get_myth_api_v1_myth_get",
+    "parameters": [
+     {
+      "name": "date",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "วันที่ต้องการ (YYYY-MM-DD) — ไม่ระบุ = วันล่าสุดในระบบ",
+       "examples": [
+        "2026-08-21"
+       ],
+       "title": "Date"
+      },
+      "description": "วันที่ต้องการ (YYYY-MM-DD) — ไม่ระบุ = วันล่าสุดในระบบ"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/astrology": {
+   "get": {
+    "summary": "การ์ดดวงชะตาประจำวัน (ปีนักษัตร/กิจกรรมแนะนำ/สีมงคล/ทิศมงคล)",
+    "operationId": "get_astrology_api_v1_astrology_get",
+    "parameters": [
+     {
+      "name": "date",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "วันที่ต้องการ — YYYY-MM-DD หรือ unix time (วินาที) — ไม่ระบุ = วันล่าสุดในระบบ",
+       "examples": [
+        "2026-09-08",
+        "1757260800"
+       ],
+       "title": "Date"
+      },
+      "description": "วันที่ต้องการ — YYYY-MM-DD หรือ unix time (วินาที) — ไม่ระบุ = วันล่าสุดในระบบ"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/lucky-shirt": {
+   "get": {
+    "summary": "สีเสื้อมงคลตามวันในสัปดาห์",
+    "operationId": "get_lucky_shirt_api_v1_lucky_shirt_get",
+    "parameters": [
+     {
+      "name": "date",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "วันที่ต้องการ (YYYY-MM-DD) — ไม่ระบุ = วันนี้",
+       "examples": [
+        "2026-08-24"
+       ],
+       "title": "Date"
+      },
+      "description": "วันที่ต้องการ (YYYY-MM-DD) — ไม่ระบุ = วันนี้"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/holiday": {
+   "get": {
+    "summary": "ปฏิทินวันหยุด/ภาคเรียน/ห้ามขายแอลกอฮอล์",
+    "operationId": "get_holiday_api_v1_holiday_get",
+    "parameters": [
+     {
+      "name": "date",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "วันที่ต้องการ (YYYY-MM-DD) — ไม่ระบุ = วันนี้",
+       "examples": [
+        "2026-03-03"
+       ],
+       "title": "Date"
+      },
+      "description": "วันที่ต้องการ (YYYY-MM-DD) — ไม่ระบุ = วันนี้"
+     },
+     {
+      "name": "month",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "ทั้งเดือน (YYYY-MM) — ใช้แทน date",
+       "examples": [
+        "2026-03"
+       ],
+       "title": "Month"
+      },
+      "description": "ทั้งเดือน (YYYY-MM) — ใช้แทน date"
+     },
+     {
+      "name": "year",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "integer",
+         "maximum": 2100,
+         "minimum": 2020
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "ทั้งปี — ใช้แทน date/month",
+       "title": "Year"
+      },
+      "description": "ทั้งปี — ใช้แทน date/month"
+     },
+     {
+      "name": "events_only",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "boolean",
+       "description": "true = เอาเฉพาะวันที่มีเหตุการณ์",
+       "default": false,
+       "title": "Events Only"
+      },
+      "description": "true = เอาเฉพาะวันที่มีเหตุการณ์"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/energy": {
+   "get": {
+    "summary": "ราคาน้ำมัน/แก๊สรายวัน (จาก DB)",
+    "operationId": "get_energy_api_v1_energy_get",
+    "parameters": [
+     {
+      "name": "date",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Date"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/electricity": {
+   "get": {
+    "summary": "อัตราค่าไฟฟ้า (MEA)",
+    "operationId": "get_electricity_api_v1_electricity_get",
+    "parameters": [
+     {
+      "name": "date",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "วันที่ต้องการ (YYYY-MM-DD) — ไม่ระบุ = วันล่าสุดในระบบ",
+       "examples": [
+        "2026-08-21"
+       ],
+       "title": "Date"
+      },
+      "description": "วันที่ต้องการ (YYYY-MM-DD) — ไม่ระบุ = วันล่าสุดในระบบ"
+     },
+     {
+      "name": "user_type",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "integer",
+         "maximum": 8,
+         "minimum": 1
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "ประเภทผู้ใช้ไฟ 1-8 — ไม่ระบุ = ทุกประเภท",
+       "title": "User Type"
+      },
+      "description": "ประเภทผู้ใช้ไฟ 1-8 — ไม่ระบุ = ทุกประเภท"
+     },
+     {
+      "name": "detailed",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "boolean",
+       "description": "แสดงรายละเอียดแยกตามรหัสอัตรา/แรงดัน/On-Off Peak",
+       "default": false,
+       "title": "Detailed"
+      },
+      "description": "แสดงรายละเอียดแยกตามรหัสอัตรา/แรงดัน/On-Off Peak"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/wage": {
+   "get": {
+    "summary": "ค่าแรงขั้นต่ำรายจังหวัด (query ตรงจาก DB — สำหรับ admin/เทียบหลายจังหวัด)",
+    "operationId": "get_wage_api_v1_wage_get",
+    "parameters": [
+     {
+      "name": "province",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Province"
+      }
+     },
+     {
+      "name": "top",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Top"
+      }
+     },
+     {
+      "name": "bottom",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Bottom"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/wage/{branch_id}": {
+   "get": {
+    "summary": "ค่าแรงขั้นต่ำของจังหวัดที่สาขานั้นตั้งอยู่",
+    "operationId": "get_wage_by_branch_api_v1_wage__branch_id__get",
+    "parameters": [
+     {
+      "name": "branch_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Branch Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/economic": {
+   "get": {
+    "summary": "อัตราแลกเปลี่ยนและเงินเฟ้อ",
+    "operationId": "get_economic_api_v1_economic_get",
+    "parameters": [
+     {
+      "name": "date",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "วันที่ต้องการ (YYYY-MM-DD) — ไม่ระบุ = วันล่าสุดในระบบ",
+       "examples": [
+        "2026-08-22"
+       ],
+       "title": "Date"
+      },
+      "description": "วันที่ต้องการ (YYYY-MM-DD) — ไม่ระบุ = วันล่าสุดในระบบ"
+     },
+     {
+      "name": "currency",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "กรองสกุลเงิน คั่นด้วย , — ไม่ระบุ = ทุกสกุล",
+       "examples": [
+        "USD,EUR,JPY"
+       ],
+       "title": "Currency"
+      },
+      "description": "กรองสกุลเงิน คั่นด้วย , — ไม่ระบุ = ทุกสกุล"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/food-price": {
+   "get": {
+    "summary": "ราคาอาหารและวัตถุดิบ",
+    "operationId": "get_food_price_api_v1_food_price_get",
+    "parameters": [
+     {
+      "name": "date",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "วันที่ต้องการ (YYYY-MM-DD) — ไม่ระบุ = วันล่าสุดในระบบ",
+       "examples": [
+        "2026-08-21"
+       ],
+       "title": "Date"
+      },
+      "description": "วันที่ต้องการ (YYYY-MM-DD) — ไม่ระบุ = วันล่าสุดในระบบ"
+     },
+     {
+      "name": "days",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 90,
+       "minimum": 1,
+       "description": "ย้อนหลังกี่วันนับจาก date — มากกว่า 1 จะแนบ ประวัติ รายวันของแต่ละสินค้า",
+       "default": 1,
+       "title": "Days"
+      },
+      "description": "ย้อนหลังกี่วันนับจาก date — มากกว่า 1 จะแนบ ประวัติ รายวันของแต่ละสินค้า"
+     },
+     {
+      "name": "protype",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "description": "ประเภทราคา: ขายปลีก / ขายส่ง / ทั้งหมด",
+       "default": "ขายปลีก",
+       "title": "Protype"
+      },
+      "description": "ประเภทราคา: ขายปลีก / ขายส่ง / ทั้งหมด"
+     },
+     {
+      "name": "category",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "กรองหมวดสินค้า — ไม่ระบุ = ทุกหมวด",
+       "examples": [
+        "เนื้อสัตว์"
+       ],
+       "title": "Category"
+      },
+      "description": "กรองหมวดสินค้า — ไม่ระบุ = ทุกหมวด"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/cost-watch": {
+   "get": {
+    "summary": "ราคาวัตถุดิบ (DIT ขายปลีก) + น้ำมัน/แก๊ส ทั้งหมดใน array เดียว",
+    "operationId": "get_cost_watch_api_v1_cost_watch_get",
+    "parameters": [
+     {
+      "name": "date",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "วันที่ต้องการ — YYYY-MM-DD หรือ unix time (วินาที) — ไม่ระบุ = วันล่าสุดในระบบ",
+       "examples": [
+        "2026-09-08",
+        "1757260800"
+       ],
+       "title": "Date"
+      },
+      "description": "วันที่ต้องการ — YYYY-MM-DD หรือ unix time (วินาที) — ไม่ระบุ = วันล่าสุดในระบบ"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/price-change-summary": {
+   "get": {
+    "summary": "เฉลี่ย % การเปลี่ยนแปลงราคาวัตถุดิบ (DIT ขายปลีก)",
+    "operationId": "get_price_change_summary_api_v1_price_change_summary_get",
+    "parameters": [
+     {
+      "name": "date",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "วันที่ต้องการ — YYYY-MM-DD หรือ unix time (วินาที) — ไม่ระบุ = วันล่าสุดในระบบ",
+       "examples": [
+        "2026-09-08",
+        "1757260800"
+       ],
+       "title": "Date"
+      },
+      "description": "วันที่ต้องการ — YYYY-MM-DD หรือ unix time (วินาที) — ไม่ระบุ = วันล่าสุดในระบบ"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/weather/{branch_id}": {
+   "get": {
+    "summary": "พยากรณ์อากาศของสาขา — รายชั่วโมง 20 ชม. + รายวัน 10 วัน",
+    "operationId": "get_weather_api_v1_weather__branch_id__get",
+    "parameters": [
+     {
+      "name": "branch_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Branch Id"
+      }
+     },
+     {
+      "name": "hours",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "integer",
+         "maximum": 20,
+         "minimum": 1
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "จำกัดรายชั่วโมงกี่ชม.ข้างหน้า — ไม่ระบุ = ทั้งหมด",
+       "title": "Hours"
+      },
+      "description": "จำกัดรายชั่วโมงกี่ชม.ข้างหน้า — ไม่ระบุ = ทั้งหมด"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/air-quality/{branch_id}": {
+   "get": {
+    "summary": "คุณภาพอากาศของสาขา — รายชั่วโมง 20 ชม. (US AQI ประมาณ)",
+    "operationId": "get_air_quality_api_v1_air_quality__branch_id__get",
+    "parameters": [
+     {
+      "name": "branch_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Branch Id"
+      }
+     },
+     {
+      "name": "hours",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "integer",
+         "maximum": 20,
+         "minimum": 1
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "จำกัดรายชั่วโมงกี่ชม.ข้างหน้า — ไม่ระบุ = ทั้งหมด",
+       "title": "Hours"
+      },
+      "description": "จำกัดรายชั่วโมงกี่ชม.ข้างหน้า — ไม่ระบุ = ทั้งหมด"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/weather-badge/{branch_id}": {
+   "get": {
+    "summary": "Badge เตือนสภาพอากาศของสาขา (SuperTrend §A2)",
+    "operationId": "get_weather_badge_api_v1_weather_badge__branch_id__get",
+    "parameters": [
+     {
+      "name": "branch_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Branch Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/weather-hero/{branch_id}": {
+   "get": {
+    "summary": "การ์ดอากาศด้านบน — ป้ายเตือน + ปัจจุบัน + ฝุ่น + 10 วัน",
+    "operationId": "get_weather_hero_api_v1_weather_hero__branch_id__get",
+    "parameters": [
+     {
+      "name": "branch_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Branch Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/sales/{branch_id}": {
+   "get": {
+    "summary": "ยอดขายจริงรายวันจาก POS",
+    "operationId": "get_sales_api_v1_sales__branch_id__get",
+    "parameters": [
+     {
+      "name": "branch_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Branch Id"
+      }
+     },
+     {
+      "name": "owner_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "รหัสเจ้าของร้าน — ไม่ระบุ = ระบบหาจาก branch_id ให้",
+       "title": "Owner Id"
+      },
+      "description": "รหัสเจ้าของร้าน — ไม่ระบุ = ระบบหาจาก branch_id ให้"
+     },
+     {
+      "name": "days",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 90,
+       "minimum": 1,
+       "description": "ย้อนหลังไปกี่วัน (นับรวมวันที่ระบุใน date)",
+       "default": 7,
+       "title": "Days"
+      },
+      "description": "ย้อนหลังไปกี่วัน (นับรวมวันที่ระบุใน date)"
+     },
+     {
+      "name": "date",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "ย้อนหลังจากวันไหน (YYYY-MM-DD) — ไม่ระบุ = ย้อนหลังจากวันนี้",
+       "examples": [
+        "2026-08-22"
+       ],
+       "title": "Date"
+      },
+      "description": "ย้อนหลังจากวันไหน (YYYY-MM-DD) — ไม่ระบุ = ย้อนหลังจากวันนี้"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/sale-forecast/{branch_id}": {
+   "get": {
+    "summary": "ยอดขายพยากรณ์ตามช่วงวัน (ไม่ใช่ยอดขายจริง)",
+    "operationId": "get_sale_forecast_api_v1_sale_forecast__branch_id__get",
+    "parameters": [
+     {
+      "name": "branch_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Branch Id"
+      }
+     },
+     {
+      "name": "owner_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "รหัสเจ้าของร้าน — ไม่ระบุ = ระบบหาจาก branch_id ให้",
+       "title": "Owner Id"
+      },
+      "description": "รหัสเจ้าของร้าน — ไม่ระบุ = ระบบหาจาก branch_id ให้"
+     },
+     {
+      "name": "start",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "วันเริ่มช่วง (YYYY-MM-DD) — ไม่ระบุ = วันนี้",
+       "examples": [
+        "2026-08-01"
+       ],
+       "title": "Start"
+      },
+      "description": "วันเริ่มช่วง (YYYY-MM-DD) — ไม่ระบุ = วันนี้"
+     },
+     {
+      "name": "end",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "วันสุดท้ายของช่วง นับรวมวันนั้น (YYYY-MM-DD) — ไม่ระบุ = 6 วันหลังจาก start",
+       "examples": [
+        "2026-08-31"
+       ],
+       "title": "End"
+      },
+      "description": "วันสุดท้ายของช่วง นับรวมวันนั้น (YYYY-MM-DD) — ไม่ระบุ = 6 วันหลังจาก start"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/sales-forecast/{branch_id}": {
+   "get": {
+    "summary": "การ์ดพยากรณ์ยอดขาย — กราฟแท่ง 7 วัน (จ-อา)",
+    "operationId": "get_sales_forecast_card_api_v1_sales_forecast__branch_id__get",
+    "parameters": [
+     {
+      "name": "branch_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Branch Id"
+      }
+     },
+     {
+      "name": "owner_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "รหัสเจ้าของร้าน — ไม่ระบุ = ระบบหาจาก branch_id ให้",
+       "title": "Owner Id"
+      },
+      "description": "รหัสเจ้าของร้าน — ไม่ระบุ = ระบบหาจาก branch_id ให้"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/disaster/{branch_id}": {
+   "get": {
+    "summary": "ภัยพิบัติใกล้สาขา (GISTDA น้ำท่วม/ไฟป่า + GDACS)",
+    "operationId": "get_disaster_api_v1_disaster__branch_id__get",
+    "parameters": [
+     {
+      "name": "branch_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Branch Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/all": {
+   "get": {
+    "summary": "รวมทุกโมดูลที่ไม่ผูกสาขา (myth, holiday, energy, ฯลฯ) ในคำขอเดียว",
+    "operationId": "get_all_global_api_v1_all_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/all/{branch_id}": {
+   "get": {
+    "summary": "รวมทุกโมดูลของสาขาเดียวในคำขอเดียว (ไม่รวมโมดูลที่ไม่ผูกสาขา — ดู /api/v1/all)",
+    "operationId": "get_all_branch_api_v1_all__branch_id__get",
+    "parameters": [
+     {
+      "name": "branch_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Branch Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  }
+ },
+ "components": {
+  "schemas": {
+   "HTTPValidationError": {
+    "properties": {
+     "detail": {
+      "items": {
+       "$ref": "#/components/schemas/ValidationError"
+      },
+      "type": "array",
+      "title": "Detail"
+     }
+    },
+    "type": "object",
+    "title": "HTTPValidationError"
+   },
+   "ValidationError": {
+    "properties": {
+     "loc": {
+      "items": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "integer"
+        }
+       ]
+      },
+      "type": "array",
+      "title": "Location"
+     },
+     "msg": {
+      "type": "string",
+      "title": "Message"
+     },
+     "type": {
+      "type": "string",
+      "title": "Error Type"
+     },
+     "input": {
+      "title": "Input"
+     },
+     "ctx": {
+      "type": "object",
+      "title": "Context"
+     }
+    },
+    "type": "object",
+    "required": [
+     "loc",
+     "msg",
+     "type"
+    ],
+    "title": "ValidationError"
+   }
+  }
+ }
+}

@@ -71,6 +71,34 @@ def summary(owner_id: str, branch_id: str, start: date, end: date) -> dict:
     return format_result(fetch(owner_id, branch_id, start, end), start, end)
 
 
+def daily_values(owner_id: str, branch_id: str, start: date, end: date,
+                 fetcher=None) -> dict[str, float]:
+    """ค่าพยากรณ์แยกรายวัน — {"2026-09-07": 43900.0, ...}
+
+    ต้นทางคืนยอดรวมก้อนเดียวต่อ 1 ช่วง ไม่ได้ breakdown รายวันมาให้ — อยากได้ 7 แท่ง
+    ต้องยิงวันละครั้ง ยิงพร้อมกันด้วย thread (รอ I/O ล้วน ไม่กิน CPU) แทนยิงเรียงกัน 7 รอบ
+    วันไหนยิงไม่ผ่านคืน 0.0 ไม่ทำให้ทั้งกราฟล่มเพราะวันเดียว
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    fn = fetcher or fetch
+    days = []
+    cursor = start
+    while cursor <= end:
+        days.append(cursor)
+        cursor += timedelta(days=1)
+
+    def one(d: date) -> float:
+        try:
+            return float(fn(owner_id, branch_id, d, d).get("total_price") or 0)
+        except Exception:
+            return 0.0
+
+    with ThreadPoolExecutor(max_workers=len(days) or 1) as pool:
+        values = list(pool.map(one, days))
+    return {d.isoformat(): v for d, v in zip(days, values)}
+
+
 def demo():
     """self-check — แปลง timestamp, แยกประเภทตัวเลข, กันค่าว่าง ไม่ต่อเน็ต"""
     # เที่ยงคืนไทยของ 2 ส.ค. 2026 = 1785603600 (ค่าเดียวกับตัวอย่างที่ทีมส่งมา)
