@@ -232,6 +232,32 @@ TABLES: dict[str, dict] = {
             )
         """,
     },
+    # ค่าฝุ่นที่ "วัดได้จริง" จากสถานีภาคพื้น (Air4Thai) — คนละเรื่องกับ fact_air_quality_hourly
+    # ที่เป็นค่าพยากรณ์จากโมเดล CAMS ของ OWM (ซึ่งต่ำกว่าค่าวัดจริงหลายเท่าในหน้าฝน)
+    #
+    # PK มี ts ด้วย เก็บทุกชั่วโมงเป็นประวัติ ไม่ทับของเก่า — ต่างจากตาราง OWM ที่แถวอนาคต
+    # ถูกเขียนทับเรื่อยๆ จนไม่เหลือร่องรอยว่า "ตอนนั้นค่าจริงเท่าไหร่"
+    # ไว้ป้อนโมเดลพยากรณ์ยอดขาย (~4,150 แถว/วัน จาก 173 สถานี)
+    "fact_air_quality_station": {
+        "pk": ["station_id", "ts"],
+        "ddl": """
+            CREATE TABLE IF NOT EXISTS fact_air_quality_station (
+                station_id TEXT NOT NULL,
+                ts TIMESTAMPTZ NOT NULL,
+                name_th TEXT,
+                area_th TEXT,
+                lat NUMERIC,
+                lon NUMERIC,
+                aqi_th INT,
+                aqi_us INT,
+                pm25 NUMERIC,
+                main_param TEXT,
+                source TEXT,
+                updated_at TIMESTAMPTZ DEFAULT now(),
+                PRIMARY KEY (station_id, ts)
+            )
+        """,
+    },
     # อากาศคีย์ด้วย (จังหวัด, เขต/อำเภอ) ไม่ใช่พิกัด — สาขาในเขตเดียวกันแชร์แถวเดียวกัน
     # ref_lat/ref_lon คือพิกัดที่ใช้ยิง API จริง เก็บไว้ debug ว่าแถวนี้มาจากจุดไหนของเขต
     # แทน fact_forecast เดิม (grid พิกัด) ซึ่งเลิกใช้แล้ว — ตารางเก่ายังอยู่ใน DB แต่ไม่มีอะไรเขียน

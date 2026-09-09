@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import db
+import modules.air4thai
 import modules.economic
 import modules.electricity
 import modules.energy
@@ -41,6 +42,8 @@ JOBS = {
     "holiday":     ("fact_event",         modules.holiday.run),
     "wage":        ("fact_minimum_wage",  modules.wage.run),
     "food_price":  ("fact_dit_price",     modules.food_price.run),
+    # รายชั่วโมง — สถานีวัดฝุ่นอัปเดตทุกชั่วโมง และเป็นค่าที่การ์ด/badge เอาไปแสดงจริง
+    "air4thai":    ("fact_air_quality_station", modules.air4thai.run),
     # ponytail: weather ไม่มีงาน cron — endpoint ยิงเองตอน cache หมดอายุ
     #           เพิ่มงานอุ่น cache ทีหลังถ้า user คนแรกของวันรอนานเกินรับได้
 }

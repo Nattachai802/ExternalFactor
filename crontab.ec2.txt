@@ -22,6 +22,12 @@ SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin
 CRON_TZ=Asia/Bangkok
 
+# ── รายชั่วโมง ───────────────────────────────────────────────
+# ค่าฝุ่นจากสถานีวัดจริง (Air4Thai) — สถานีอัปเดตทุกชั่วโมง และเป็นค่าที่การ์ด/badge แสดงจริง
+# นาทีที่ 5 ไม่ใช่นาทีที่ 0 — เลี่ยงนาทีที่ระบบราชการโดนยิงพร้อมกันจากทุกที่
+# ยิง 1 ครั้งได้ทั้ง 173 สถานีทั่วประเทศ ไม่ว่าจะมีกี่สาขา
+5 * * * *   cd /home/ubuntu/ExternalFactor && docker compose exec -T api python jobs.py air4thai     >> output/cron_air4thai.log 2>&1
+
 # ── รายวัน (ช่วงตี 1) ────────────────────────────────────────
 # ราคาน้ำมันประกาศเช้าตรู่ — ดึงตอนตี 1 หลังประกาศแล้ว
 0  1 * * *  cd /home/ubuntu/ExternalFactor && docker compose exec -T api python jobs.py energy       >> output/cron_energy.log 2>&1

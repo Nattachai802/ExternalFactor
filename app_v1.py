@@ -17,6 +17,7 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 load_dotenv()
 
 import db
+import modules.air4thai
 import modules.air_quality
 import modules.badge
 import modules.branch
@@ -119,6 +120,31 @@ def resolve_area(branch_id: str) -> tuple[dict, dict, bool]:
             {"province": DEFAULT_PROVINCE, "district": DEFAULT_DISTRICT}, True)
 
 
+def branch_aqi(loc: dict, owm_rows: list[dict],
+               background_tasks: BackgroundTasks | None = None) -> int | None:
+    """ค่าฝุ่นของสาขา — สถานีวัดจริง (Air4Thai) ก่อน ล่ม/ไกลเกินค่อยตกไปใช้โมเดลของ OWM
+
+    ส่งค่า AQI ที่กรมควบคุมมลพิษคำนวณ (สเกลไทย) เพราะเป็นเลขเดียวกับที่ผู้ใช้เห็น
+    ในแอปฝุ่นอื่น — ยิงเทียบแล้วตรงกับ IQAir เป๊ะ (29 เท่ากัน) ส่วนค่าจากโมเดล OWM
+    ต่ำกว่าค่าวัดจริงหลายเท่าในหน้าฝน (จตุจักร: 3 vs 29) จึงเหลือไว้เป็นตัวสำรองเท่านั้น
+
+    ไม่เพิ่ม field ใหม่ในการ์ด — เปลี่ยนเฉพาะที่มาของตัวเลขใน aqi_us เดิม
+    """
+    try:
+        station, to_save = modules.air4thai.current(loc["lat"], loc["lon"])
+    except Exception:
+        station, to_save = {}, []
+
+    if background_tasks:
+        for table, rows in to_save:
+            background_tasks.add_task(db.save_rows, table, rows)
+
+    if station.get("aqi_th") is not None:
+        return station["aqi_th"]
+
+    return owm_rows[0]["aqi_us"] if owm_rows else None
+
+
 def default_area_warning(branch_id: str) -> str:
     return (f"สาขา {branch_id} ยังไม่ได้ตั้งค่าตำแหน่ง — แสดงข้อมูลของ "
             f"{DEFAULT_DISTRICT} {DEFAULT_PROVINCE} แทน")
@@ -164,7 +190,7 @@ def get_job_health():
     now = datetime.now(timezone.utc)
     # เกินกำหนดแค่ไหนถึงถือว่าผิดปกติ — เผื่อจากรอบจริงพอสมควร กัน alert ลวง
     # (เช่น daily ตั้ง 2 วัน ไม่ใช่ 1 วัน เพราะ cron อาจรันช้าไปนิดหรือเครื่องเพิ่ง reboot)
-    MAX_AGE = {"energy": 2, "myth": 2, "food_price": 2,
+    MAX_AGE = {"air4thai": 1, "energy": 2, "myth": 2, "food_price": 2,
                "economic": 10, "electricity": 40, "wage": 40,
                "lucky_shirt": 200, "holiday": 200}
 
@@ -647,7 +673,8 @@ def get_weather_badge(branch_id: str, background_tasks: BackgroundTasks):
 
     current_id = hourly[0]["weather_id"] if hourly else None
     temp_max = daily[0]["temp_max"] if daily else None
-    aqi = aqi_rows[0]["aqi_us"] if aqi_rows else None
+    # ใช้แหล่งเดียวกับ /weather-hero — badge 2 เส้นต้องไม่ให้ระดับต่างกันในวันที่ค่าคาบเส้น
+    aqi = branch_aqi(loc, aqi_rows, background_tasks)
     periods = modules.badge.pop_periods_remaining_today(hourly)
 
     badge = modules.badge.evaluate(current_id, periods, temp_max, aqi,
@@ -690,7 +717,7 @@ def get_weather_hero(branch_id: str, background_tasks: BackgroundTasks):
     for table, rows in weather_save + aqi_save + disaster_save:
         background_tasks.add_task(db.save_rows, table, rows)
 
-    aqi = aqi_rows[0]["aqi_us"] if aqi_rows else None
+    aqi = branch_aqi(loc, aqi_rows, background_tasks)
     badge = modules.badge.evaluate(
         hourly[0]["weather_id"] if hourly else None,
         modules.badge.pop_periods_remaining_today(hourly),
