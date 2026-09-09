@@ -493,13 +493,13 @@ def get_food_price(
 
 
 # ── ต้นทุนและพลังงาน (ST-01 / ST-04) ─────────────────────────
-# รวม 2 ตาราง (fact_dit_price ขายปลีก + fact_daily น้ำมัน/แก๊ส) เป็น array แบนอันเดียว
-# ยิงครั้งเดียวได้ทั้งการ์ดหน้าแรกและหน้ารายการเต็ม — /api/v1/food-price เดิมยังอยู่
+# 4 ช่องคงที่จาก 2 ตาราง (fact_dit_price ขายปลีก + fact_daily น้ำมัน/แก๊ส) ยิงครั้งเดียวได้ครบการ์ด
+# ไม่ใช่รายการเต็มของ DIT — อันนั้นยังอยู่ที่ /api/v1/food-price เหมือนเดิม
 ENERGY_SOURCES = ("Kapook%", "EPPO%")
 ENERGY_WHERE = "(source LIKE %s OR source LIKE %s)"
 
 
-@app.get("/api/v1/cost-watch", summary="ราคาวัตถุดิบ (DIT ขายปลีก) + น้ำมัน/แก๊ส ทั้งหมดใน array เดียว")
+@app.get("/api/v1/cost-watch", summary="การ์ดเฝ้าระวังต้นทุน — หมูสามชั้น/ไข่ไก่/ดีเซล B20/แก๊สหุงต้ม")
 def get_cost_watch(
     date: str | None = Query(None, description="วันที่ต้องการ — YYYY-MM-DD หรือ unix time (วินาที) — ไม่ระบุ = วันล่าสุดในระบบ",
                              examples=["2026-09-08", "1757260800"]),
@@ -507,13 +507,14 @@ def get_cost_watch(
     d, warning = _parse_date(date)
 
     # 2 ตารางอัปเดตคนละรอบ cron — หาวันล่าสุดของแต่ละตารางแยกกัน ไม่บังคับให้ตรงกัน
-    # ไม่คัดสินค้า: ส่ง DIT ขายปลีกทั้งหมด + พลังงานทั้งหมด ให้หน้าบ้านเลือกเอง
-    dit_rows, _ = db.latest_snapshot(
-        "fact_dit_price", "date", d, where="protype = %s", params=("ขายปลีก",),
-    )
-    daily_rows, daily_date = db.latest_snapshot(
-        "fact_daily", "date", d, where=ENERGY_WHERE, params=ENERGY_SOURCES,
-    )
+    # เงื่อนไขกรองมาจากโมดูล (cost_watch.FILTER_ENABLED) — endpoint ไม่ต้องรู้ว่าโหมดไหน
+    dit_where, dit_params = modules.cost_watch.dit_filter()
+    dit_rows, _ = db.latest_snapshot("fact_dit_price", "date", d,
+                                     where=dit_where, params=dit_params)
+
+    daily_where, daily_params = modules.cost_watch.daily_filter(ENERGY_WHERE, ENERGY_SOURCES)
+    daily_rows, daily_date = db.latest_snapshot("fact_daily", "date", d,
+                                                where=daily_where, params=daily_params)
 
     if not dit_rows and not daily_rows:
         raise HTTPException(status_code=404, detail="ยังไม่มีข้อมูลราคาวัตถุดิบ/พลังงานใน DB เลย")
