@@ -25,7 +25,13 @@ from decimal import Decimal
 
 import requests
 
-API = "https://sys.apisupergourmet.com/api/pos/v1/report/super-trend-metrics"
+# ยิง prod ก่อนเสมอ — ข้อมูลการเงินของจริงอยู่ที่นั่น
+# test เป็นทางสำรองสำหรับสาขาที่ยังไม่ถูกย้ายขึ้น prod (เส้นเดียวกันเป๊ะ ต่างแค่ domain)
+POS_PATH = "/api/pos/v1/report/super-trend-metrics"
+POS_HOSTS = [
+    ("prod", "https://ros-api.supercoconut.net"),
+    ("test", "https://sys.apisupergourmet.com"),
+]
 SOURCE = "Super Gourmet POS"
 TH_TZ = timezone(timedelta(hours=7))
 
@@ -33,15 +39,49 @@ TH_TZ = timezone(timedelta(hours=7))
 NO_REVENUE = "no_revenue"
 
 
-def fetch(owner_id: str, branch_id: str, start_at: int, end_at: int) -> list[dict]:
-    """ยิง POS API — start_at/end_at เป็น unix timestamp (วินาที)"""
-    r = requests.get(API, params={"owner_id": owner_id, "branch_id": branch_id,
-                                  "start_at": start_at, "end_at": end_at}, timeout=30)
+def fetch_one(base_url: str, owner_id: str, branch_id: str,
+              start_at: int, end_at: int) -> list[dict]:
+    """ยิง POS 1 host — start_at/end_at เป็น unix timestamp (วินาที), raise ถ้าไม่สำเร็จ"""
+    r = requests.get(f"{base_url}{POS_PATH}",
+                     params={"owner_id": owner_id, "branch_id": branch_id,
+                             "start_at": start_at, "end_at": end_at}, timeout=30)
     r.raise_for_status()
     payload = r.json()
     if payload.get("status", {}).get("code") != 1000:
         raise ValueError(f"POS API ไม่สำเร็จ: {payload.get('status')}")
     return (payload.get("data") or {}).get("metrics") or []
+
+
+def fetch(owner_id: str, branch_id: str, start_at: int, end_at: int,
+          fetcher=None) -> list[dict]:
+    """ไล่ยิงตาม POS_HOSTS — เจอบิลที่ host ไหนใช้ที่นั่น
+
+    prod ตอบ [] แปลได้ทั้ง "สาขาไม่มีในระบบ" และ "วันนั้นไม่มีบิลจริง" แยกจากกันไม่ได้
+    จึงลอง test ต่อ แล้วถ้า test ก็ไม่เจอค่อยคืน [] ของ prod (= วันนั้นยอด 0 ไม่ใช่ error)
+    ทุก host พัง --> raise ตัวแรกให้ผู้เรียกจัดการ (endpoint ตอบ 503)
+
+    fetcher: ฟังก์ชัน (base_url, owner, branch, start, end) สำหรับ inject ตอนทดสอบ
+    """
+    fn = fetcher or fetch_one
+    first_error, empty_from = None, None
+
+    for name, base_url in POS_HOSTS:
+        try:
+            rows = fn(base_url, owner_id, branch_id, start_at, end_at)
+        except Exception as e:
+            print(f"  ⚠️  POS {name} ({base_url}) ไม่สำเร็จ: {type(e).__name__}: {e}")
+            first_error = first_error or e
+            continue
+
+        if rows:
+            return rows
+        print(f"  ℹ️  POS {name} ไม่มีบิลในช่วงที่ขอ — ลอง host ถัดไป")
+        if empty_from is None:
+            empty_from = rows        # เก็บ [] ตัวแรกไว้เป็นคำตอบสุดท้าย
+
+    if empty_from is not None:
+        return empty_from
+    raise first_error
 
 
 def day_of(bill_closed_at: str) -> date:
@@ -168,7 +208,47 @@ def demo():
 
     assert format_rows([], date(2026, 8, 18), date(2026, 8, 18))["ยอดรวมทั้งช่วง"] == 0.0
 
-    print("✅ ผ่าน — แปลงวัน UTC→ไทย (รวมขอบ 17:00), ตัด no_revenue, Decimal ไม่เพี้ยน, ช่วงวันครบ")
+    # ── ไล่ยิง prod ก่อน แล้วค่อย test ────────────────────────
+    bill = [{"total_net_sales": "10.00", "payment_method": ["cash"], "bill_status": "SUCCESS",
+             "bill_closed_at": "2026-08-18 07:00:00 +0000 UTC"}]
+
+    def hosts_called(script):
+        """script: {ชื่อ host: ผลลัพธ์ หรือ Exception} — คืน (ผลของ fetch, host ที่ถูกยิง)"""
+        called = []
+
+        def fake(base_url, *_):
+            name = next(n for n, url in POS_HOSTS if url == base_url)
+            called.append(name)
+            out = script[name]
+            if isinstance(out, Exception):
+                raise out
+            return out
+
+        return fetch("o", "b", 0, 1, fetcher=fake), called
+
+    got, called = hosts_called({"prod": bill, "test": bill})
+    assert got == bill and called == ["prod"], f"prod มีบิลแล้วต้องไม่ยิง test ต่อ ({called})"
+
+    got, called = hosts_called({"prod": [], "test": bill})
+    assert got == bill and called == ["prod", "test"], "prod ว่างต้องลอง test"
+
+    got, called = hosts_called({"prod": [], "test": []})
+    assert got == [] and called == ["prod", "test"], "ไม่เจอทั้งคู่ต้องคืน [] ไม่ใช่ raise"
+
+    got, called = hosts_called({"prod": RuntimeError("prod ล่ม"), "test": bill})
+    assert got == bill, "prod ล่มต้องตกไป test ได้"
+
+    try:
+        hosts_called({"prod": RuntimeError("prod ล่ม"), "test": RuntimeError("test ล่ม")})
+    except RuntimeError as e:
+        assert "prod" in str(e), "ต้อง raise error ของ host แรก ไม่ใช่ตัวหลัง"
+    else:
+        raise AssertionError("ทุก host พังต้อง raise ไม่ใช่คืนค่าเงียบๆ")
+
+    assert [n for n, _ in POS_HOSTS] == ["prod", "test"], "ลำดับต้องเป็น prod ก่อนเสมอ"
+
+    print("✅ ผ่าน — แปลงวัน UTC→ไทย (รวมขอบ 17:00), ตัด no_revenue, Decimal ไม่เพี้ยน, "
+          "ช่วงวันครบ, ไล่ยิง prod→test")
 
 
 if __name__ == "__main__":
