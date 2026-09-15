@@ -23,6 +23,11 @@ def week_window(today: date) -> tuple[date, date]:
     return monday, monday + timedelta(days=6)
 
 
+# สาขาใหม่ที่ระบบยังไม่มีโมเดลพยากรณ์ให้ จะได้ค่า 0 กลับมาทุกวัน — บอกตรงๆ ว่ายังใช้ไม่ได้
+# ดีกว่าขึ้นว่า "คาดว่ายอดขายจะอยู่ที่ 0 บาท" ซึ่งอ่านแล้วเหมือนทำนายว่าจะขายไม่ออก
+NO_FORECAST_MSG = "การคาดการณ์ยอดขายจะพร้อมใช้งาน เมื่อมีข้อมูลย้อนหลังครบ 2 เดือน"
+
+
 def _headline(day: date, value: float) -> str:
     """'ศุกร์ 5 ส.ค. นี้ คาดว่ายอดขายจะอยู่ที่ 45,854 บาท' — จัดรูปแบบเสร็จก่อนส่ง"""
     return (f"{WEEKDAY_FULL[day.weekday()]} {day.day} {MONTH_ABBR[day.month - 1]} นี้ "
@@ -51,12 +56,17 @@ def format_card(today: date, actual_by_date: dict[str, float],
         })
         cursor += timedelta(days=1)
 
+    # ทั้งสัปดาห์เป็น 0 = ยังไม่มีโมเดลให้สาขานี้ ไม่ใช่ทำนายว่าจะขายไม่ได้
+    # วันนี้เป็น 0 แต่วันอื่นมีค่า = โมเดลทำงานอยู่ ทายว่าวันนี้ขายไม่ออกจริงๆ ต้องขึ้นตามปกติ
+    has_forecast = any(s["forecast_value"] for s in series)
+
     return {
         "window": {"start_date": start.isoformat(), "end_date": end.isoformat(),
                    "today": today.isoformat()},
         "series": series,
         "summary": {
-            "headline": _headline(today, float(forecast_by_date.get(today.isoformat(), 0.0))),
+            "headline": (_headline(today, float(forecast_by_date.get(today.isoformat(), 0.0)))
+                         if has_forecast else NO_FORECAST_MSG),
             # ยังไม่มีตัวประเมินน้ำหนักผลกระทบ — ส่ง array ว่างไปก่อน ไม่ใช่ null
             "reasons": [],
         },
@@ -100,7 +110,20 @@ def demo():
     assert len(blank["series"]) == 7
     assert all(s["actual_net_sales"] == 0.0 and s["forecast_value"] == 0.0
                for s in blank["series"])
-    assert "0 บาท" in blank["summary"]["headline"]
+
+    # ── สาขาที่ระบบยังพยากรณ์ให้ไม่ได้ (ค่าเป็น 0 ทั้งสัปดาห์) ──
+    assert blank["summary"]["headline"] == NO_FORECAST_MSG, blank["summary"]["headline"]
+    assert blank["summary"]["reasons"] == [], "reasons ยังต้องเป็น array ว่าง ไม่ใช่หาย"
+    assert len(blank["series"]) == 7, "ยังต้องส่งครบ 7 แท่ง ไม่ใช่ตัดทิ้ง"
+
+    # วันนี้เป็น 0 แต่วันอื่นมีค่า = โมเดลทำงานอยู่ ต้องขึ้น headline ปกติ
+    partial = format_card(today, {}, {"2026-09-11": 50000.0})
+    assert partial["summary"]["headline"] != NO_FORECAST_MSG
+    assert "0 บาท" in partial["summary"]["headline"], partial["summary"]["headline"]
+
+    # มีค่าเฉพาะวันนี้ก็ต้องขึ้นปกติเหมือนกัน
+    only_today = format_card(today, {}, {today.isoformat(): 44120.0})
+    assert "44,120 บาท" in only_today["summary"]["headline"]
 
     print("✅ ผ่าน — สัปดาห์จันทร์-อาทิตย์, label, is_today, ยอดจริงวันนี้/อนาคตเป็น 0, ไม่มี null")
 
