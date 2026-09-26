@@ -190,7 +190,7 @@ def get_job_health():
     now = datetime.now(timezone.utc)
     # เกินกำหนดแค่ไหนถึงถือว่าผิดปกติ — เผื่อจากรอบจริงพอสมควร กัน alert ลวง
     # (เช่น daily ตั้ง 2 วัน ไม่ใช่ 1 วัน เพราะ cron อาจรันช้าไปนิดหรือเครื่องเพิ่ง reboot)
-    MAX_AGE = {"air4thai": 1, "energy": 2, "myth": 2, "food_price": 2,
+    MAX_AGE = {"air4thai": 1, "thaiwater": 1, "energy": 2, "myth": 2, "food_price": 2,
                "economic": 10, "electricity": 40, "wage": 40,
                "lucky_shirt": 200, "holiday": 200}
 

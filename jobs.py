@@ -29,6 +29,7 @@ import modules.food_price
 import modules.holiday
 import modules.lucky_shirt
 import modules.myth
+import modules.thaiwater
 import modules.wage
 import modules.weather
 
@@ -44,6 +45,8 @@ JOBS = {
     "food_price":  ("fact_dit_price",     modules.food_price.run),
     # รายชั่วโมง — สถานีวัดฝุ่นอัปเดตทุกชั่วโมง และเป็นค่าที่การ์ด/badge เอาไปแสดงจริง
     "air4thai":    ("fact_air_quality_station", modules.air4thai.run),
+    # ทุก 4 ชม. — เก็บเฉพาะสถานีที่ "เป็นภัย" (น้ำมาก/ล้นตลิ่ง/น้ำน้อยวิกฤติ) ไม่เก็บสภาพปกติ
+    "thaiwater":   ("fact_water_level",    modules.thaiwater.run),
     # ponytail: weather ไม่มีงาน cron — endpoint ยิงเองตอน cache หมดอายุ
     #           เพิ่มงานอุ่น cache ทีหลังถ้า user คนแรกของวันรอนานเกินรับได้
 }

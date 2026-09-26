@@ -20,14 +20,21 @@ import feedparser
 import requests
 
 import db
+from modules import thaiwater
 
 GISTDA_BASE = "https://api-gateway.gistda.or.th/api/2.0/resources"
 GDACS_RSS = "https://www.gdacs.org/xml/rss.xml"
+# ระดับน้ำมาจาก modules/thaiwater.py — เกณฑ์/รัศมีอยู่ในไฟล์นั้นที่เดียว
 TH_TZ = timezone(timedelta(hours=7))
 DEFAULT_LAT, DEFAULT_LON = 13.8479, 100.5697
 
 TTL = timedelta(minutes=30)   # สั้นกว่า weather มาก — ภัยพิบัติต้องสด
 BBOX_DEG = 0.1                # ~11 กม.ต่อด้าน (ละติจูดไทย 1° ≈ 111 กม.)
+
+# ค่าเดิมคือ 50 ซึ่งตัดข้อมูลทิ้งเงียบๆ — สุโขทัยมีจริง 1,463 แปลงแต่เราเห็นแค่ 50
+# (พื้นที่รวมใน detail จึงต่ำกว่าจริงมาก และตำบลที่อยู่หลังลำดับ 50 หายไปทั้งตำบล)
+# ยิงเทียบแล้ว GISTDA รับได้ถึง 5000 — เกินกว่านั้นไม่รู้ จึงเช็คการถูกตัดไว้ด้วย
+GISTDA_LIMIT = 5000
 
 # น้ำท่วมใช้ 7 วัน — ภาพดาวเทียมไม่ได้ถ่ายทุกวัน 1day มักว่างทั้งที่ยังท่วมอยู่จริง
 # ไฟป่าใช้ 1 วัน — จุดความร้อนเป็นเหตุการณ์ ณ ขณะนั้น ของเก่าไม่ได้แปลว่ายังไหม้อยู่
@@ -47,7 +54,7 @@ def bbox_around(lat: float, lon: float, deg: float = BBOX_DEG) -> str:
     return f"{lon - deg},{lat - deg},{lon + deg},{lat + deg}"
 
 
-def _gistda(path: str, bbox: str, limit: int = 50) -> dict:
+def _gistda(path: str, bbox: str, limit: int = GISTDA_LIMIT) -> dict:
     key = os.getenv("GISTDA_API_KEY")
     if not key:
         raise RuntimeError("ไม่พบ GISTDA_API_KEY ใน environment")
@@ -66,8 +73,12 @@ def fetch_gistda(lat: float, lon: float) -> list[dict]:
     bbox = bbox_around(lat, lon)
     events = []
 
+    flood_features = _gistda(FLOOD_PATH, bbox).get("features", [])
+    # ได้เท่ากับเพดานพอดี = ยังมีอีกแต่ถูกตัด — บอกไว้ในข้อความว่าตัวเลขเป็นขั้นต่ำ
+    truncated = len(flood_features) >= GISTDA_LIMIT
+
     by_area: dict[tuple, dict] = {}
-    for f in _gistda(FLOOD_PATH, bbox).get("features", []):
+    for f in flood_features:
         p = f.get("properties", {})
         area_key = (p.get("pv_tn"), p.get("ap_tn"), p.get("tb_tn"))
         entry = by_area.setdefault(area_key, {"area": 0.0, "count": 0})
@@ -78,7 +89,9 @@ def fetch_gistda(lat: float, lon: float) -> list[dict]:
         where = " ".join(x for x in (tambon, amphoe, province) if x)
         events.append({
             "kind": "น้ำท่วม", "level": "ส้ม", "source": "GISTDA",
-            "detail": f"พื้นที่น้ำท่วม {where} รวม {agg['area'] / 1_000_000:.2f} ตร.กม. ({agg['count']} แปลง)",
+            "detail": (f"พื้นที่น้ำท่วม {where} "
+                       f"รวม{'อย่างน้อย ' if truncated else ' '}{agg['area'] / 1_000_000:.2f} ตร.กม. "
+                       f"({agg['count']} แปลง)"),
             "province": province or "", "district": amphoe or "",
         })
 
@@ -93,6 +106,22 @@ def fetch_gistda(lat: float, lon: float) -> list[dict]:
         })
 
     return events
+
+
+def fetch_thaiwater(lat: float, lon: float) -> list[dict]:
+    """ระดับน้ำคลอง/แม่น้ำใกล้สาขา — อ่านจาก DB ที่ cron เก็บไว้ก่อน หมดอายุค่อยยิงสด
+
+    เติมช่องว่างของ GISTDA: ภาพดาวเทียมจับน้ำท่วมขังในเมืองไม่ได้ (อาคาร/ต้นไม้บัง
+    และน้ำระบายหมดก่อนดาวเทียมรอบถัดไป) — ยิงจริงที่กรุงเทพตอนท่วมได้ 0 แปลงทุกจุด
+    ขณะที่สถานีวัดคลองลาดพร้าว/ลำปลาทิวขึ้นระดับ 5 (น้ำล้นตลิ่ง) ตามความจริง
+
+    ตรรกะการเลือกสถานี/เกณฑ์ระดับอยู่ใน modules/thaiwater.py ที่เดียว — job ที่เก็บ
+    ประวัติลง fact_water_level ใช้ตัวเดียวกัน จะได้ไม่มีเกณฑ์ 2 ชุดที่เพี้ยนจากกันได้
+    """
+    station = thaiwater.nearest_alert(lat, lon)          # อ่าน DB
+    if not station:
+        station = thaiwater.nearest_alert(lat, lon, rows=thaiwater.fetch_current())
+    return [thaiwater.as_event(station)] if station else []
 
 
 def _event_coords(entry) -> tuple[float, float] | None:
@@ -143,7 +172,8 @@ def rows(lat: float, lon: float, province: str, district: str) -> list[dict]:
     now = datetime.now(timezone.utc)
     events, errors = [], []
 
-    for name, fetch in (("GISTDA", fetch_gistda), ("GDACS", fetch_gdacs)):
+    for name, fetch in (("GISTDA", fetch_gistda), ("GDACS", fetch_gdacs),
+                        ("thaiwater", fetch_thaiwater)):
         try:
             events.extend(fetch(lat, lon))
         except Exception as e:
@@ -215,7 +245,7 @@ def format_rows(rows_: list[dict]) -> dict:
         } for r in events],
         "อัปเดตล่าสุด": max(updated).astimezone(TH_TZ).isoformat() if updated else None,
         "ข้อผิดพลาดบางแหล่ง": errors[0] if errors else None,
-        "แหล่งข้อมูล": "GISTDA (น้ำท่วม/ไฟป่า) + GDACS (ภัยระดับโลก)",
+        "แหล่งข้อมูล": "GISTDA (น้ำท่วม/ไฟป่า) + GDACS (ภัยระดับโลก) + thaiwater (ระดับน้ำคลอง)",
     }
 
 
@@ -248,14 +278,16 @@ def demo():
              {"kind": "น้ำท่วม", "level": "ส้ม", "detail": f"ตำบล{i}",
               "province": "", "district": "", "source": "GISTDA"}
              for i in range(3)]), \
-         _mock.patch(f"{__name__}.fetch_gdacs", return_value=[]):
+         _mock.patch(f"{__name__}.fetch_gdacs", return_value=[]), \
+         _mock.patch(f"{__name__}.fetch_thaiwater", return_value=[]):
         batch = rows(13.8, 100.5, "Bangkok", "Chatuchak")
     assert len({r["snapshot_at"] for r in batch}) == 1, "ทั้งชุดต้องใช้ snapshot_at เดียวกัน"
     assert len(batch) == 3
 
     # แหล่งล่มทั้งคู่ → ต้องได้แถวว่าง 1 แถว (ไม่ใช่ลิสต์ว่าง) ไม่งั้นแยกไม่ออกจาก "ยังไม่เคยเช็ค"
     with _mock.patch(f"{__name__}.fetch_gistda", side_effect=RuntimeError("down")), \
-         _mock.patch(f"{__name__}.fetch_gdacs", side_effect=RuntimeError("down")):
+         _mock.patch(f"{__name__}.fetch_gdacs", side_effect=RuntimeError("down")), \
+         _mock.patch(f"{__name__}.fetch_thaiwater", side_effect=RuntimeError("down")):
         empty = rows(13.8, 100.5, "Bangkok", "Chatuchak")
     assert len(empty) == 1 and empty[0]["kind"] == "" and "down" in empty[0]["fetch_error"]
 
@@ -284,7 +316,26 @@ def demo():
 
     assert format_rows([])["อัปเดตล่าสุด"] is None
 
-    print("✅ ผ่าน — bbox (lon ก่อน lat), TTL 30 นาที, snapshot ชุดเดียวกัน, แยกปลอดภัย/มีภัย, แหล่งล่มไม่พัง")
+    # ── ระดับน้ำ (แหล่งที่ 3) — ตรรกะการเลือกสถานีเทสต์อยู่ใน modules/thaiwater.py ──
+    HERE = (13.8479, 100.5697)          # จตุจักร
+
+    with _mock.patch(f"{__name__}.fetch_gistda", return_value=[]), \
+         _mock.patch(f"{__name__}.fetch_gdacs", return_value=[]), \
+         _mock.patch(f"{__name__}.fetch_thaiwater", return_value=[
+             {"kind": "น้ำล้นตลิ่ง", "level": "แดง", "detail": "x",
+              "province": "", "district": "", "source": "thaiwater (สสน.)"}]):
+        water_rows = rows(*HERE, "Bangkok", "Chatuchak")
+    assert has_alert(water_rows) and water_rows[0]["kind"] == "น้ำล้นตลิ่ง"
+
+    # แหล่งที่ 3 ล่มต้องไม่ทำให้อีก 2 แหล่งหาย แค่แนบ error ไว้
+    with _mock.patch(f"{__name__}.fetch_gistda", return_value=[]), \
+         _mock.patch(f"{__name__}.fetch_gdacs", return_value=[]), \
+         _mock.patch(f"{__name__}.fetch_thaiwater", side_effect=RuntimeError("down")):
+        degraded = rows(*HERE, "Bangkok", "Chatuchak")
+    assert "thaiwater" in degraded[0]["fetch_error"] and degraded[0]["kind"] == ""
+
+    print("✅ ผ่าน — bbox (lon ก่อน lat), TTL 30 นาที, snapshot ชุดเดียวกัน, แยกปลอดภัย/มีภัย, "
+          "แหล่งล่มไม่พัง, ระดับน้ำจากสถานีวัด (เกณฑ์ 4+, รัศมี 15 กม.)")
 
 
 if __name__ == "__main__":

@@ -232,6 +232,34 @@ TABLES: dict[str, dict] = {
             )
         """,
     },
+    # ระดับน้ำจากสถานีวัดของ สสน. (thaiwater) — เก็บเฉพาะตอนที่ "เป็นภัย" ไม่เก็บสภาพปกติ
+    # situation_level: 5 น้ำล้นตลิ่ง, 4 น้ำมาก, 3 ปกติ, 2 น้ำน้อย, 1 น้ำน้อยวิกฤติ (ภัยแล้ง)
+    # สเกลนี้ไม่ได้เรียงดี→แย่ ระดับ 1 กับ 5 คือภัยคนละแบบ ส่วน 3 ต่างหากที่เป็นปกติ
+    #
+    # เก็บทุกสถานีทุกชั่วโมงจะได้ ~7 ล้านแถว/ปี ซึ่งส่วนใหญ่เป็นระดับ 3 ที่ไม่มีอะไรเกิดขึ้น
+    # จึงกรองตั้งแต่ตอนเขียน — ตารางนี้ตอบคำถาม "ช่วงไหนมีภัย" ไม่ใช่ "ระดับน้ำปกติเท่าไหร่"
+    "fact_water_level": {
+        "pk": ["station_id", "ts"],
+        "ddl": """
+            CREATE TABLE IF NOT EXISTS fact_water_level (
+                station_id TEXT NOT NULL,
+                ts TIMESTAMPTZ NOT NULL,
+                name_th TEXT,
+                province TEXT,
+                amphoe TEXT,
+                lat NUMERIC,
+                lon NUMERIC,
+                level_msl NUMERIC,
+                storage_percent NUMERIC,
+                situation_level INT,
+                source TEXT,
+                updated_at TIMESTAMPTZ DEFAULT now(),
+                PRIMARY KEY (station_id, ts)
+            );
+            -- query หลักกรองด้วย ts ช่วงแคบ แต่ PK เรียงตาม station_id ก่อน ใช้ index นั้นไม่ได้
+            CREATE INDEX IF NOT EXISTS idx_water_level_ts ON fact_water_level (ts DESC);
+        """,
+    },
     # ค่าฝุ่นที่ "วัดได้จริง" จากสถานีภาคพื้น (Air4Thai) — คนละเรื่องกับ fact_air_quality_hourly
     # ที่เป็นค่าพยากรณ์จากโมเดล CAMS ของ OWM (ซึ่งต่ำกว่าค่าวัดจริงหลายเท่าในหน้าฝน)
     #
