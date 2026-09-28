@@ -29,8 +29,9 @@ CRON_TZ=Asia/Bangkok
 5 * * * *   cd /home/ubuntu/ExternalFactor && docker compose exec -T api python jobs.py air4thai     >> output/cron_air4thai.log 2>&1
 
 # ระดับน้ำจากสถานีวัด (thaiwater) — เก็บเฉพาะสถานีที่เป็นภัย ไม่เก็บสภาพปกติ
-# ทุก 4 ชม.พอ: ระดับน้ำขยับช้ากว่าฝุ่น และเราสนใจ "ช่วงที่เป็นภัย" ไม่ใช่กราฟละเอียด
-20 */4 * * * cd /home/ubuntu/ExternalFactor && docker compose exec -T api python jobs.py thaiwater    >> output/cron_thaiwater.log 2>&1
+# ทุกชั่วโมง: badge อ่านจากตารางนี้ (ไม่ยิงสดแล้ว) — ถี่เท่านี้น้ำขึ้นเตือนช้าไม่เกิน 1 ชม.
+# ต้นทางอัปเดตทุก 10 นาที และ 1 รอบ = 1 request ได้ทั้งประเทศ ไม่เปลืองอะไร
+20 * * * * cd /home/ubuntu/ExternalFactor && docker compose exec -T api python jobs.py thaiwater    >> output/cron_thaiwater.log 2>&1
 
 # ── รายวัน (ช่วงตี 1) ────────────────────────────────────────
 # ราคาน้ำมันประกาศเช้าตรู่ — ดึงตอนตี 1 หลังประกาศแล้ว
