@@ -11,6 +11,7 @@ cache key = (จังหวัด, เขต/อำเภอ) ไม่ใช�
     python -m modules.weather test            # self-check (ไม่ต่อเน็ต)
 """
 import os
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 
 import requests
@@ -145,11 +146,18 @@ def get(province: str, district: str, lat: float, lon: float):
     hourly, daily = load(province, district)
     to_save = []
 
-    if not _fresh(hourly, HOURLY_TTL):
-        hourly = hourly_rows(province, district, lat, lon)
+    # 2 call ไม่ขึ้นต่อกัน — หมดอายุพร้อมกันเมื่อไหร่ยิงคู่กันไปเลย รอแค่ตัวที่ช้ากว่า
+    with ThreadPoolExecutor(2) as ex:
+        hourly_job = (None if _fresh(hourly, HOURLY_TTL)
+                      else ex.submit(hourly_rows, province, district, lat, lon))
+        daily_job = (None if _fresh(daily, DAILY_TTL)
+                     else ex.submit(daily_rows, province, district, lat, lon))
+
+    if hourly_job:
+        hourly = hourly_job.result()
         to_save.append(("fact_weather_hourly", hourly))
-    if not _fresh(daily, DAILY_TTL):
-        daily = daily_rows(province, district, lat, lon)
+    if daily_job:
+        daily = daily_job.result()
         to_save.append(("fact_weather_daily", daily))
 
     return hourly, daily, to_save

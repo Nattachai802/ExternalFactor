@@ -6,6 +6,7 @@ modules/*.py เท่านั้น ทุก endpoint เป็น GET (อ�
     uvicorn app_v1:app --reload
 """
 import calendar
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date as _date
 from datetime import datetime, timedelta, timezone
 
@@ -121,7 +122,8 @@ def resolve_area(branch_id: str) -> tuple[dict, dict, bool]:
 
 
 def branch_aqi(loc: dict, owm_rows: list[dict],
-               background_tasks: BackgroundTasks | None = None) -> int | None:
+               background_tasks: BackgroundTasks | None = None,
+               station_result: tuple[dict, list] | None = None) -> int | None:
     """ค่าฝุ่นของสาขา — สถานีวัดจริง (Air4Thai) ก่อน ล่ม/ไกลเกินค่อยตกไปใช้โมเดลของ OWM
 
     ส่งค่า AQI ที่กรมควบคุมมลพิษคำนวณ (สเกลไทย) เพราะเป็นเลขเดียวกับที่ผู้ใช้เห็น
@@ -129,11 +131,16 @@ def branch_aqi(loc: dict, owm_rows: list[dict],
     ต่ำกว่าค่าวัดจริงหลายเท่าในหน้าฝน (จตุจักร: 3 vs 29) จึงเหลือไว้เป็นตัวสำรองเท่านั้น
 
     ไม่เพิ่ม field ใหม่ในการ์ด — เปลี่ยนเฉพาะที่มาของตัวเลขใน aqi_us เดิม
+
+    station_result: ผลของ air4thai.current() ที่ผู้เรียกดึงไว้แล้ว (เช่นยิงพร้อมกับ weather)
+    ไม่ส่งมา = ดึงเองที่นี่
     """
-    try:
-        station, to_save = modules.air4thai.current(loc["lat"], loc["lon"])
-    except Exception:
-        station, to_save = {}, []
+    if station_result is None:
+        try:
+            station_result = modules.air4thai.current(loc["lat"], loc["lon"])
+        except Exception:
+            station_result = ({}, [])
+    station, to_save = station_result
 
     if background_tasks:
         for table, rows in to_save:
@@ -143,6 +150,28 @@ def branch_aqi(loc: dict, owm_rows: list[dict],
         return station["aqi_th"]
 
     return owm_rows[0]["aqi_us"] if owm_rows else None
+
+
+def fetch_weather_sources(loc: dict, area: dict):
+    """(weather, air_quality, disaster, air4thai) เป็น Future ที่ทำงานเสร็จแล้วทั้ง 4 ตัว
+
+    4 แหล่งไม่ขึ้นต่อกัน — ยิงพร้อมกัน ครั้งแรก (cache หมด) รอแค่ตัวที่ช้าสุด ไม่ใช่ผลรวม
+    คืน Future ไม่ใช่ผล เพราะแต่ละ endpoint รับมือตอนแหล่งไหนล่มต่างกัน (503 หรือค่าว่าง)
+    """
+    args = (area["province"], area["district"], loc["lat"], loc["lon"])
+    with ThreadPoolExecutor(4) as ex:
+        return (ex.submit(modules.weather.get, *args),
+                ex.submit(modules.air_quality.get, *args),
+                ex.submit(modules.disaster.get, *args),
+                ex.submit(modules.air4thai.current, loc["lat"], loc["lon"]))
+
+
+def _result_or(job, default):
+    """ผลของงานใน thread — ล่มก็คืน default แทน ให้การ์ดยังแสดงส่วนที่เหลือได้"""
+    try:
+        return job.result()
+    except Exception:
+        return default
 
 
 def default_area_warning(branch_id: str) -> str:
@@ -652,21 +681,16 @@ def get_air_quality(branch_id: str, background_tasks: BackgroundTasks,
 @app.get("/api/v1/weather-badge/{branch_id}", summary="Badge เตือนสภาพอากาศของสาขา (SuperTrend §A2)")
 def get_weather_badge(branch_id: str, background_tasks: BackgroundTasks):
     loc, area, is_default = resolve_area(branch_id)
+    weather_job, aqi_job, disaster_job, station_job = fetch_weather_sources(loc, area)
 
     try:
-        hourly, daily, weather_save = modules.weather.get(area["province"], area["district"],
-                                                           loc["lat"], loc["lon"])
-        aqi_rows, aqi_save = modules.air_quality.get(area["province"], area["district"],
-                                                      loc["lat"], loc["lon"])
+        hourly, daily, weather_save = weather_job.result()
+        aqi_rows, aqi_save = aqi_job.result()
     except Exception:
         raise HTTPException(status_code=503, detail="ระบบพยากรณ์อากาศ (OWM) ขัดข้อง — กรุณาลองใหม่ภายหลัง")
 
     # ภัยพิบัติล่มไม่ควรทำให้ badge ทั้งอันหาย — ไม่มีข้อมูลถือว่าไม่มีภัย (เงื่อนไขอื่นยังทำงาน)
-    try:
-        disaster_rows, disaster_save = modules.disaster.get(area["province"], area["district"],
-                                                             loc["lat"], loc["lon"])
-    except Exception:
-        disaster_rows, disaster_save = [], []
+    disaster_rows, disaster_save = _result_or(disaster_job, ([], []))
 
     for table, rows in weather_save + aqi_save + disaster_save:
         background_tasks.add_task(db.save_rows, table, rows)
@@ -674,7 +698,8 @@ def get_weather_badge(branch_id: str, background_tasks: BackgroundTasks):
     current_id = hourly[0]["weather_id"] if hourly else None
     temp_max = daily[0]["temp_max"] if daily else None
     # ใช้แหล่งเดียวกับ /weather-hero — badge 2 เส้นต้องไม่ให้ระดับต่างกันในวันที่ค่าคาบเส้น
-    aqi = branch_aqi(loc, aqi_rows, background_tasks)
+    aqi = branch_aqi(loc, aqi_rows, background_tasks,
+                     station_result=_result_or(station_job, ({}, [])))
     periods = modules.badge.pop_periods_remaining_today(hourly)
 
     badge = modules.badge.evaluate(current_id, periods, temp_max, aqi,
@@ -696,28 +721,22 @@ def get_weather_badge(branch_id: str, background_tasks: BackgroundTasks):
 def get_weather_hero(branch_id: str, background_tasks: BackgroundTasks):
     loc, area, is_default = resolve_area(branch_id)
 
+    weather_job, aqi_job, disaster_job, station_job = fetch_weather_sources(loc, area)
+
     try:
-        hourly, daily, weather_save = modules.weather.get(area["province"], area["district"],
-                                                          loc["lat"], loc["lon"])
+        hourly, daily, weather_save = weather_job.result()
     except Exception:
         raise HTTPException(status_code=503, detail="ระบบพยากรณ์อากาศ (OWM) ขัดข้อง — กรุณาลองใหม่ภายหลัง")
 
     # ฝุ่น/ภัยพิบัติล่มไม่ควรทำให้การ์ดทั้งใบหาย — ฝุ่นเป็น 0, ภัยพิบัติถือว่าไม่มี
-    try:
-        aqi_rows, aqi_save = modules.air_quality.get(area["province"], area["district"],
-                                                     loc["lat"], loc["lon"])
-    except Exception:
-        aqi_rows, aqi_save = [], []
-    try:
-        disaster_rows, disaster_save = modules.disaster.get(area["province"], area["district"],
-                                                           loc["lat"], loc["lon"])
-    except Exception:
-        disaster_rows, disaster_save = [], []
+    aqi_rows, aqi_save = _result_or(aqi_job, ([], []))
+    disaster_rows, disaster_save = _result_or(disaster_job, ([], []))
 
     for table, rows in weather_save + aqi_save + disaster_save:
         background_tasks.add_task(db.save_rows, table, rows)
 
-    aqi = branch_aqi(loc, aqi_rows, background_tasks)
+    aqi = branch_aqi(loc, aqi_rows, background_tasks,
+                     station_result=_result_or(station_job, ({}, [])))
     badge = modules.badge.evaluate(
         hourly[0]["weather_id"] if hourly else None,
         modules.badge.pop_periods_remaining_today(hourly),
@@ -820,7 +839,7 @@ def get_sales_forecast_card(
 
 # ── ภัยพิบัติ ────────────────────────────────────────────────
 # แยกเส้นของตัวเอง — badge ใช้แค่ "มี/ไม่มี" แต่เส้นนี้ให้รายละเอียดครบ เอาไปใช้เรื่องอื่นได้
-@app.get("/api/v1/disaster/{branch_id}", summary="ภัยพิบัติใกล้สาขา (GISTDA น้ำท่วม/ไฟป่า + GDACS)")
+@app.get("/api/v1/disaster/{branch_id}", summary="ภัยพิบัติใกล้สาขา (GISTDA น้ำท่วม/ไฟป่า + thaiwater ระดับน้ำ)")
 def get_disaster(branch_id: str, background_tasks: BackgroundTasks):
     loc, area, is_default = resolve_area(branch_id)
 
