@@ -839,7 +839,7 @@ def get_sales_forecast_card(
 
 # ── ภัยพิบัติ ────────────────────────────────────────────────
 # แยกเส้นของตัวเอง — badge ใช้แค่ "มี/ไม่มี" แต่เส้นนี้ให้รายละเอียดครบ เอาไปใช้เรื่องอื่นได้
-@app.get("/api/v1/disaster/{branch_id}", summary="ภัยพิบัติใกล้สาขา (GISTDA น้ำท่วม/ไฟป่า + thaiwater ระดับน้ำ)")
+@app.get("/api/v1/disaster/{branch_id}", summary="ภัยพิบัติใกล้สาขา (thaiwater ระดับน้ำสถานีวัด)")
 def get_disaster(branch_id: str, background_tasks: BackgroundTasks):
     loc, area, is_default = resolve_area(branch_id)
 
