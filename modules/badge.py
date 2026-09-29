@@ -4,7 +4,7 @@
 ไม่ scrape/ไม่ต่อเน็ต — รับผลจาก weather.py + air_quality.py ที่ยิงมาแล้วมาคำนวณต่อ
 
 เข้าหลายเงื่อนไข → เอาระดับสูงสุด ไม่บวกกัน (ตามสเปก)
-disaster_level = ระดับ badge จากภัยพิบัติ (disaster.badge_level) — น้ำล้นตลิ่ง 3, น้ำมาก 1, ไม่มี 0
+ภัยพิบัติมาจาก disaster.water_alert() — น้ำล้นตลิ่ง 3, น้ำมาก 1, ไม่มี 0
 น้ำมาก (70-100% ตลิ่ง) ยังไม่ออกนอกคลอง ไม่ควรแรงกว่าฝนฟ้าคะนองที่ตกหน้าร้าน จึงแค่เฝ้าระวัง
 
     python -m modules.badge test    # self-check (ไม่ต่อเน็ต)
@@ -84,8 +84,14 @@ def _first_run(periods: list[dict], threshold: int) -> dict | None:
 
 
 def evaluate(current_weather_id: int | None, pop_periods: list[dict],
-            temp_max: float | None, aqi: int | None, disaster_level: int = 0) -> dict:
-    """คำนวณระดับ + badge + ข้อความ 2 บรรทัด ตามสเปก §A2/§A4 ทั้งหมด — ฟังก์ชันบริสุทธิ์"""
+            temp_max: float | None, aqi: int | None, water: dict | None = None) -> dict:
+    """คำนวณระดับ + badge + ข้อความ 2 บรรทัด ตามสเปก §A2/§A4 ทั้งหมด — ฟังก์ชันบริสุทธิ์
+
+    water = disaster.water_alert() — {level: 3|1, station, pct, km} หรือ None ถ้าไม่มีภัย
+    ข้อความน้ำบอกสิ่งที่วัดได้จริง (สถานี/% ตลิ่ง/ระยะ) ไม่อ้าง "ประกาศทางการ" เพราะไม่มีใครประกาศ
+    """
+    disaster_level = water["level"] if water else 0
+    where = f"ที่{water['station']}" if water and water.get("station") else "ใกล้ร้าน"
     is_thunder = current_weather_id in THUNDERSTORM_IDS
     is_heavy_rain = current_weather_id in HEAVY_RAIN_IDS
     is_fog = current_weather_id in FOG_IDS
@@ -107,9 +113,10 @@ def evaluate(current_weather_id: int | None, pop_periods: list[dict],
     )
 
     # ลำดับตาม §A4 เป๊ะ — เอาตัวแรกที่เข้าเงื่อนไข ไม่ใช่ตัวรุนแรงสุด
-    # ponytail: ข้อความยังเหมือนเดิมทุกระดับน้ำ — แยกข้อความ 4/5 + ชื่อสถานีทีหลัง
-    if disaster_level:
-        line2 = "มีประกาศเตือนภัยในพื้นที่ — โปรดติดตามประกาศจากทางการ"
+    # น้ำล้นตลิ่ง (3) มาก่อนทุกอย่าง / น้ำมาก (1) อยู่หลังเงื่อนไขระดับ 2 ข้อความจะได้ตรงกับป้าย
+    if disaster_level == 3:
+        away = f" ห่าง {water['km']} กม." if water.get("km") is not None else ""
+        line2 = f"น้ำล้นตลิ่ง{where}{away} — อาจกระทบการเดินทางและรอบจัดส่ง"
     elif is_thunder:
         line2 = "อาจส่งผลกระทบ: พื้นที่นั่งกลางแจ้ง, อุปกรณ์ไฟฟ้านอกอาคาร, การเดินทาง และรอบจัดส่ง"
     elif is_heavy_rain:
@@ -122,6 +129,9 @@ def evaluate(current_weather_id: int | None, pop_periods: list[dict],
         line2 = f"ค่าฝุ่นเริ่มมีผลกระทบต่อกลุ่มเสี่ยง ({aqi}) — อาจส่งผลต่อพื้นที่นั่งกลางแจ้ง"
     elif _temp_level(temp_max) == 2:
         line2 = f"อากาศร้อนจัด {round(temp_max)} °C — อาจส่งผลกระทบต่อพื้นที่นั่งกลางแจ้งและภาระระบบความเย็น"
+    elif disaster_level:
+        pct = f" ({water['pct']:.0f}% ของตลิ่ง)" if water.get("pct") is not None else ""
+        line2 = f"ระดับน้ำ{where}ค่อนข้างสูง{pct} — เฝ้าระวัง"
     elif run50:
         line2 = f"อาจมีฝนตกในช่วง {run50['start']}–{run50['end']}"
     elif is_fog:
@@ -150,13 +160,25 @@ def demo():
     assert out["ป้าย"] == "มีผลต่อยอดขาย"
     assert out["บรรทัดที่ 2"] == "มีโอกาสฝนตก 85% ช่วง 15:00–21:00 — อาจกระทบพื้นที่นั่งกลางแจ้งและรอบจัดส่ง", out
 
-    # ลำดับความสำคัญของข้อความ — คำ-01 มาก่อนทุกอย่างแม้ระดับเท่ากัน
-    assert evaluate(200, [], None, None, disaster_level=3)["บรรทัดที่ 2"].startswith("มีประกาศเตือนภัย")
+    # ── น้ำ: ล้นตลิ่ง → 3 ข้อความมาก่อนทุกอย่าง / น้ำมาก → 1 ข้อความอยู่หลังเงื่อนไขระดับ 2 ──
+    flood = {"level": 3, "station": "คลองลาดพร้าว วัดบางบัว", "pct": 112.49, "km": 2.0}
+    high = {"level": 1, "station": "กรมชลประทานสามเสน", "pct": 97.97, "km": 3.6}
 
-    # น้ำล้นตลิ่ง → 3, น้ำมาก → 1 (เฝ้าระวัง) — ฝนฟ้าคะนองระดับ 2 ต้องชนะน้ำมาก
-    assert evaluate(800, [], None, None, disaster_level=3)["ระดับ"] == 3
-    assert evaluate(800, [], None, None, disaster_level=1)["ระดับ"] == 1
-    assert evaluate(211, [], None, None, disaster_level=1)["ระดับ"] == 2
+    out = evaluate(200, [], None, None, water=flood)       # ฝนฟ้าคะนองด้วย ข้อความน้ำก็ยังมาก่อน
+    assert out["ระดับ"] == 3
+    assert out["บรรทัดที่ 2"] == "น้ำล้นตลิ่งที่คลองลาดพร้าว วัดบางบัว ห่าง 2.0 กม. — อาจกระทบการเดินทางและรอบจัดส่ง"
+
+    out = evaluate(800, [], None, None, water=high)
+    assert out["ระดับ"] == 1
+    assert out["บรรทัดที่ 2"] == "ระดับน้ำที่กรมชลประทานสามเสนค่อนข้างสูง (98% ของตลิ่ง) — เฝ้าระวัง"
+
+    out = evaluate(211, [], None, None, water=high)       # ฝนฟ้าคะนอง (2) ชนะน้ำมาก (1) ทั้งระดับและข้อความ
+    assert out["ระดับ"] == 2 and "อุปกรณ์ไฟฟ้านอกอาคาร" in out["บรรทัดที่ 2"]
+
+    out = evaluate(800, [], None, None, water={"level": 1})   # ไม่มีรายละเอียดสถานีก็ยังไม่พัง
+    assert out["บรรทัดที่ 2"] == "ระดับน้ำใกล้ร้านค่อนข้างสูง — เฝ้าระวัง"
+    for w in (flood, high):
+        assert "ประกาศ" not in evaluate(800, [], None, None, water=w)["บรรทัดที่ 2"], "ห้ามอ้างประกาศทางการ"
 
     # ฝนฟ้าคะนอง (thunderstorm id) → ระดับ 2 แม้ pop/aqi/temp ปกติหมด
     out = evaluate(211, [], temp_max=30, aqi=20)

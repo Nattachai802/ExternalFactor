@@ -14,6 +14,7 @@
     python -m modules.disaster --lat 18.4 --lon 103.4
     python -m modules.disaster test                # self-check (ไม่ต่อเน็ต)
 """
+import re
 from datetime import datetime, timedelta, timezone
 
 import db
@@ -95,12 +96,27 @@ def has_alert(rows_: list[dict]) -> bool:
     return any(r.get("kind") for r in rows_)
 
 
-def badge_level(rows_: list[dict]) -> int:
-    """ระดับ badge จากภัยพิบัติ — น้ำล้นตลิ่ง (แดง) 3, น้ำมาก (ส้ม) 1, ไม่มีภัย 0"""
+def water_alert(rows_: list[dict]) -> dict | None:
+    """เหตุการณ์ที่รุนแรงสุด สำหรับ badge — {level, station, pct, km} หรือ None ถ้าไม่มีภัย
+
+    level: น้ำล้นตลิ่ง (แดง) 3, น้ำมาก (ส้ม) 1
+    station/pct/km แกะจาก detail ที่ thaiwater.as_event สร้างเอง — fact_disaster ไม่มีคอลัมน์แยก
+    ponytail: แกะ string ของเราเอง — ถ้า as_event เปลี่ยนรูปแบบ ได้ None แล้วข้อความ badge
+    ตกไปแบบทั่วไป ("ใกล้ร้าน") ไม่พัง; อยากแน่นกว่านี้ค่อยเพิ่มคอลัมน์ใน fact_disaster
+    """
     events = [r for r in rows_ if r.get("kind")]
     if not events:
-        return 0
-    return 3 if any(r.get("level") == "แดง" for r in events) else 1
+        return None
+    worst = next((r for r in events if r.get("level") == "แดง"), events[0])
+    detail = worst.get("detail") or ""
+    pct = re.search(r"\(([\d.]+)% ของตลิ่ง\)", detail)
+    km = re.search(r"ห่าง ([\d.]+) กม\.", detail)
+    return {
+        "level": 3 if worst.get("level") == "แดง" else 1,
+        "station": detail.split(" ระดับน้ำ ")[0] if " ระดับน้ำ " in detail else None,
+        "pct": float(pct.group(1)) if pct else None,
+        "km": float(km.group(1)) if km else None,
+    }
 
 
 def format_rows(rows_: list[dict]) -> dict:
@@ -175,9 +191,19 @@ def demo():
     safe = [{"province": "Bangkok", "district": "Chatuchak", "kind": "", "level": "",
              "detail": "", "event_province": "", "event_district": "", "source": "",
              "fetch_error": None, "updated_at": now}]
-    assert not has_alert(safe) and badge_level(safe) == 0
-    assert badge_level([dict(safe[0], kind="น้ำล้นตลิ่ง", level="แดง")]) == 3
-    assert badge_level([dict(safe[0], kind="ระดับน้ำสูง", level="ส้ม")]) == 1, "น้ำมากแค่เฝ้าระวัง"
+    assert not has_alert(safe) and water_alert(safe) is None
+
+    # detail ต้องมาจาก thaiwater.as_event ตัวจริง — ถ้ารูปแบบเปลี่ยน test นี้ต้องพังให้เห็น
+    st = {"name_th": "กรมชลประทานสามเสน", "level_msl": 1.92, "storage_percent": 97.97,
+          "distance_km": 3.6, "ts": now}
+    high = dict(safe[0], **{k: v for k, v in thaiwater.as_event({**st, "situation_level": 4}).items()
+                            if k in ("kind", "level", "detail")})
+    flood = dict(high, **{k: v for k, v in thaiwater.as_event({**st, "situation_level": 5}).items()
+                          if k in ("kind", "level", "detail")})
+    assert water_alert([high]) == {"level": 1, "station": "กรมชลประทานสามเสน", "pct": 97.97, "km": 3.6}
+    assert water_alert([high, flood])["level"] == 3, "มีล้นตลิ่งต้องเลือกตัวแดง"
+    assert water_alert([dict(high, detail="รูปแบบอื่น")]) == \
+        {"level": 1, "station": None, "pct": None, "km": None}, "แกะไม่ได้ต้องไม่พัง"
     out = format_rows(safe)
     assert out["มีประกาศเตือนภัย"] is False and out["ภัยพิบัติ"] == []
 
