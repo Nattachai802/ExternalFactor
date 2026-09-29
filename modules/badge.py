@@ -4,8 +4,8 @@
 ไม่ scrape/ไม่ต่อเน็ต — รับผลจาก weather.py + air_quality.py ที่ยิงมาแล้วมาคำนวณต่อ
 
 เข้าหลายเงื่อนไข → เอาระดับสูงสุด ไม่บวกกัน (ตามสเปก)
-ยังไม่มีแหล่งข้อมูล "ประกาศเตือนภัยพิบัติ" ในระบบ — พารามิเตอร์ disaster_alert รับไว้เผื่ออนาคต
-ดีฟอลต์ False เสมอในตอนนี้ (ดูหมายเหตุใน app_v1.py จุดที่เรียกใช้)
+disaster_level = ระดับ badge จากภัยพิบัติ (disaster.badge_level) — น้ำล้นตลิ่ง 3, น้ำมาก 1, ไม่มี 0
+น้ำมาก (70-100% ตลิ่ง) ยังไม่ออกนอกคลอง ไม่ควรแรงกว่าฝนฟ้าคะนองที่ตกหน้าร้าน จึงแค่เฝ้าระวัง
 
     python -m modules.badge test    # self-check (ไม่ต่อเน็ต)
 """
@@ -84,7 +84,7 @@ def _first_run(periods: list[dict], threshold: int) -> dict | None:
 
 
 def evaluate(current_weather_id: int | None, pop_periods: list[dict],
-            temp_max: float | None, aqi: int | None, disaster_alert: bool = False) -> dict:
+            temp_max: float | None, aqi: int | None, disaster_level: int = 0) -> dict:
     """คำนวณระดับ + badge + ข้อความ 2 บรรทัด ตามสเปก §A2/§A4 ทั้งหมด — ฟังก์ชันบริสุทธิ์"""
     is_thunder = current_weather_id in THUNDERSTORM_IDS
     is_heavy_rain = current_weather_id in HEAVY_RAIN_IDS
@@ -94,7 +94,7 @@ def evaluate(current_weather_id: int | None, pop_periods: list[dict],
     run50 = _first_run(pop_periods, 50)  # ใช้ตอนไม่มี run70 เท่านั้น (คำ-08 อยู่หลัง คำ-04)
 
     level = max(
-        3 if disaster_alert else 0,
+        disaster_level,
         3 if _aqi_level(aqi) == 3 else 0,
         2 if (is_thunder or is_heavy_rain) else 0,
         2 if run70 else 0,
@@ -107,7 +107,8 @@ def evaluate(current_weather_id: int | None, pop_periods: list[dict],
     )
 
     # ลำดับตาม §A4 เป๊ะ — เอาตัวแรกที่เข้าเงื่อนไข ไม่ใช่ตัวรุนแรงสุด
-    if disaster_alert:
+    # ponytail: ข้อความยังเหมือนเดิมทุกระดับน้ำ — แยกข้อความ 4/5 + ชื่อสถานีทีหลัง
+    if disaster_level:
         line2 = "มีประกาศเตือนภัยในพื้นที่ — โปรดติดตามประกาศจากทางการ"
     elif is_thunder:
         line2 = "อาจส่งผลกระทบ: พื้นที่นั่งกลางแจ้ง, อุปกรณ์ไฟฟ้านอกอาคาร, การเดินทาง และรอบจัดส่ง"
@@ -150,7 +151,12 @@ def demo():
     assert out["บรรทัดที่ 2"] == "มีโอกาสฝนตก 85% ช่วง 15:00–21:00 — อาจกระทบพื้นที่นั่งกลางแจ้งและรอบจัดส่ง", out
 
     # ลำดับความสำคัญของข้อความ — คำ-01 มาก่อนทุกอย่างแม้ระดับเท่ากัน
-    assert evaluate(200, [], None, None, disaster_alert=True)["บรรทัดที่ 2"].startswith("มีประกาศเตือนภัย")
+    assert evaluate(200, [], None, None, disaster_level=3)["บรรทัดที่ 2"].startswith("มีประกาศเตือนภัย")
+
+    # น้ำล้นตลิ่ง → 3, น้ำมาก → 1 (เฝ้าระวัง) — ฝนฟ้าคะนองระดับ 2 ต้องชนะน้ำมาก
+    assert evaluate(800, [], None, None, disaster_level=3)["ระดับ"] == 3
+    assert evaluate(800, [], None, None, disaster_level=1)["ระดับ"] == 1
+    assert evaluate(211, [], None, None, disaster_level=1)["ระดับ"] == 2
 
     # ฝนฟ้าคะนอง (thunderstorm id) → ระดับ 2 แม้ pop/aqi/temp ปกติหมด
     out = evaluate(211, [], temp_max=30, aqi=20)

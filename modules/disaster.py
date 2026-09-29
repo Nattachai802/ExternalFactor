@@ -95,6 +95,14 @@ def has_alert(rows_: list[dict]) -> bool:
     return any(r.get("kind") for r in rows_)
 
 
+def badge_level(rows_: list[dict]) -> int:
+    """ระดับ badge จากภัยพิบัติ — น้ำล้นตลิ่ง (แดง) 3, น้ำมาก (ส้ม) 1, ไม่มีภัย 0"""
+    events = [r for r in rows_ if r.get("kind")]
+    if not events:
+        return 0
+    return 3 if any(r.get("level") == "แดง" for r in events) else 1
+
+
 def format_rows(rows_: list[dict]) -> dict:
     """แถว DB → record ภาษาไทย — ฟังก์ชันบริสุทธิ์ ไม่ต่อเน็ต ไม่แตะ DB"""
     events = [r for r in rows_ if r.get("kind")]
@@ -167,7 +175,9 @@ def demo():
     safe = [{"province": "Bangkok", "district": "Chatuchak", "kind": "", "level": "",
              "detail": "", "event_province": "", "event_district": "", "source": "",
              "fetch_error": None, "updated_at": now}]
-    assert not has_alert(safe)
+    assert not has_alert(safe) and badge_level(safe) == 0
+    assert badge_level([dict(safe[0], kind="น้ำล้นตลิ่ง", level="แดง")]) == 3
+    assert badge_level([dict(safe[0], kind="ระดับน้ำสูง", level="ส้ม")]) == 1, "น้ำมากแค่เฝ้าระวัง"
     out = format_rows(safe)
     assert out["มีประกาศเตือนภัย"] is False and out["ภัยพิบัติ"] == []
 

@@ -703,7 +703,7 @@ def get_weather_badge(branch_id: str, background_tasks: BackgroundTasks):
     periods = modules.badge.pop_periods_remaining_today(hourly)
 
     badge = modules.badge.evaluate(current_id, periods, temp_max, aqi,
-                                    disaster_alert=modules.disaster.has_alert(disaster_rows))
+                                    disaster_level=modules.disaster.badge_level(disaster_rows))
 
     result = {
         "branch": {"branch_id": branch_id, "name": loc["name"],
@@ -742,7 +742,7 @@ def get_weather_hero(branch_id: str, background_tasks: BackgroundTasks):
         modules.badge.pop_periods_remaining_today(hourly),
         daily[0]["temp_max"] if daily else None,
         aqi,
-        disaster_alert=modules.disaster.has_alert(disaster_rows),
+        disaster_level=modules.disaster.badge_level(disaster_rows),
     )
 
     result = modules.weather_card.format_card(hourly, daily, aqi, badge)
