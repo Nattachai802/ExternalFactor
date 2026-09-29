@@ -33,7 +33,7 @@ def fetch_thaiwater(lat: float, lon: float) -> list[dict]:
     """
     rows_ = thaiwater.load_fresh()
     if not rows_:   # ponytail: DB ว่าง = cron ยังไม่รัน หรือทั้งประเทศไม่มีสถานีเข้าเกณฑ์
-        rows_ = thaiwater.fetch_current()
+        rows_ = thaiwater.recent(thaiwater.fetch_current())   # ตัดสถานีค่าค้าง
     station = thaiwater.nearest_alert(lat, lon, rows=rows_)
     return [thaiwater.as_event(station)] if station else []
 
