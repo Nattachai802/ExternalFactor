@@ -39,7 +39,10 @@ DROUGHT_LEVELS = {1}         # น้ำน้อยวิกฤติ — ไ�
 ALERT_LEVELS = FLOOD_LEVELS
 KIND_TH = {5: "น้ำล้นตลิ่ง", 4: "ระดับน้ำสูง", 1: "ภัยแล้ง (น้ำน้อยวิกฤติ)"}
 
-RADIUS_KM = 15.0             # สถานีไกลกว่านี้มักคนละคลอง ไม่สะท้อนพื้นที่สาขา
+# ค้นเป็นวงขยาย — วงไหนมีสถานี (ระดับใดก็ได้) ตัดสินจากวงนั้นแล้วจบ ไม่ขยายต่อ
+# สถานีใกล้บอก "ปกติ" ต้องชนะสถานีไกลที่ล้นตลิ่ง (คนละคลอง) — ร้านอาหารสนใจรอบร้าน
+# เกิน 8 กม. ถือว่าคนละเขตแล้ว ไม่มีสถานีเลย = ไม่เตือน
+RINGS_KM = (4.0, 6.0, 8.0)
 # cron ทุกชั่วโมง — เผื่อพลาดไป 1 รอบ ค่าที่วัดเก่ากว่านี้ถือว่าใช้ไม่ได้
 # (สถานีเสียบางตัว API ยังส่งค่าค้างเป็นวัน เช่น คลองลำปลาทิวค้างระดับ 5 ตั้งแต่ 27 ก.ย.)
 FRESH_WINDOW = timedelta(hours=2)
@@ -182,17 +185,17 @@ def backfill(verbose: bool = True) -> list[dict]:
 
 
 def load_fresh() -> list[dict]:
-    """สถานีเตือนภัย (ระดับ 4-5) ที่มีค่าใหม่พอจะใช้ได้ — อ่านจาก DB ที่ cron เขียนไว้
+    """สถานีทุกระดับที่มีค่าใหม่พอจะใช้ได้ — อ่านจาก DB ที่ cron เขียนไว้
 
-    กรองระดับใน SQL — ตารางเก็บทุกระดับแล้ว ไม่กรองจะดึงมา ~1,600 แถวทั้งที่ใช้แค่ส่วนน้อย
+    ไม่กรองระดับ — nearest_alert ต้องเห็นสถานีปกติด้วย ถึงจะรู้ว่า "ใกล้ร้านมีสถานี และปกติ"
+    (~1,600 แถว เพิ่มราว 10-30 ms เฉพาะตอน cache ภัยพิบัติหมดอายุ)
     ตารางถูกสร้างตอน job แรกเขียน — deploy ใหม่ที่ยังไม่เคยรัน cron ยังไม่มีตาราง
     ถือว่า "ยังไม่มีข้อมูล" ให้ผู้เรียกไปยิงสดต่อ ไม่ใช่ error
     """
     now = datetime.now(timezone.utc)
     try:
         return db.rows_between("fact_water_level", "ts", now - FRESH_WINDOW,
-                               now + timedelta(hours=1),
-                               where="situation_level IN (4, 5)")
+                               now + timedelta(hours=1))
     except Exception:
         return []
 
@@ -204,25 +207,31 @@ def recent(rows: list[dict]) -> list[dict]:
 
 
 def nearest_alert(lat: float, lon: float, rows: list[dict] | None = None) -> dict:
-    """สถานีที่วิกฤตสุดในรัศมี — คืน {} ถ้าไม่มีสถานีเตือนภัยใกล้พิกัดนั้น
+    """สถานีเตือนภัยของสาขา — คืน {} ถ้าไม่ต้องเตือน
 
-    เอามาแห่งเดียวพอ: 3 สถานีในคลองเดียวกันคือเหตุการณ์เดียว ไม่ใช่ 3 เหตุการณ์
-    เลือกที่ระดับสูงกว่าก่อน ระดับเท่ากันเอาที่ใกล้กว่า
+    วงขยาย RINGS_KM: วงแรกที่มีสถานี (ที่มีระดับ) ใช้ตัดสินแล้วจบ
+      มีระดับ 4-5 ในวงนั้น → เตือน   /   ทุกตัวปกติ → ไม่เตือน (ไม่ไปหาวงที่ไกลกว่า)
+    สถานีไม่จัดระดับไม่นับว่า "เจอ" — บอกไม่ได้ว่าปกติหรือไม่
+    เอามาแห่งเดียวพอ: 3 สถานีในคลองเดียวกันคือเหตุการณ์เดียว
+    ในวงเดียวกัน เลือกระดับสูงกว่าก่อน ระดับเท่ากันเอาที่ใกล้กว่า
     """
-    best, best_km = None, None
+    located = []
     for r in (rows if rows is not None else load_fresh()):
-        if r.get("situation_level") not in ALERT_LEVELS:
-            continue
         rlat, rlon = _f(r.get("lat")), _f(r.get("lon"))
-        if rlat is None or rlon is None:
+        if r.get("situation_level") is None or rlat is None or rlon is None:
             continue
-        km = distance_km(lat, lon, rlat, rlon)
-        if km > RADIUS_KM:
-            continue
-        if best is None or (r["situation_level"], -km) > (best["situation_level"], -best_km):
-            best, best_km = r, km
+        located.append((r, distance_km(lat, lon, rlat, rlon)))
 
-    return {**best, "distance_km": round(best_km, 1)} if best else {}
+    for ring in RINGS_KM:
+        in_ring = [(r, km) for r, km in located if km <= ring]
+        if not in_ring:
+            continue
+        alerts = [(r, km) for r, km in in_ring if r["situation_level"] in ALERT_LEVELS]
+        if not alerts:
+            return {}
+        best, best_km = max(alerts, key=lambda p: (p[0]["situation_level"], -p[1]))
+        return {**best, "distance_km": round(best_km, 1)}
+    return {}
 
 
 def as_event(station: dict) -> dict:
@@ -289,16 +298,39 @@ def demo():
     assert got["station_id"] == "1", "ต้องเลือกตัววิกฤตสุดในรัศมี"
     assert got["distance_km"] == 2.0, got["distance_km"]
 
-    only4 = [r for r in rows if r["station_id"] == "2"]
-    assert nearest_alert(*HERE, rows=only4)["situation_level"] == 4
+    only4 = [r for r in rows if r["station_id"] == "2"]      # สามเสน ห่างจตุจักร ~11 กม.
+    assert nearest_alert(*HERE, rows=only4) == {}, "เกิน 8 กม.ต้องไม่เตือน แม้ระดับ 4"
+    near4 = [dict(only4[0], lat=HERE[0] + 0.02, lon=HERE[1])]   # ย้ายมาห่าง ~2 กม.
+    assert nearest_alert(*HERE, rows=near4)["situation_level"] == 4
 
     # ภัยแล้งเก็บลง DB แต่ห้ามขึ้น badge (ไม่กระทบยอดขายวันนั้น)
     drought = [r for r in rows if r["station_id"] == "5"]
     assert nearest_alert(*HERE, rows=drought) == {}, "ภัยแล้งต้องไม่ทำให้ badge เตือน"
 
     far = [r for r in rows if r["station_id"] == "4"]
-    assert nearest_alert(*HERE, rows=far) == {}, "เกิน 15 กม.ต้องไม่เตือน"
+    assert nearest_alert(*HERE, rows=far) == {}, "เกิน 8 กม.ต้องไม่เตือน"
     assert nearest_alert(*HERE, rows=[]) == {}
+
+    # ── วงขยาย 4 → 6 → 8 กม. ─────────────────────────────────
+    def at(sid, km_north, level):     # สถานีทางเหนือของ HERE ห่าง km_north กม.
+        return {"station_id": sid, "lat": HERE[0] + km_north / 111.2, "lon": HERE[1],
+                "situation_level": level, "ts": now, "name_th": sid}
+
+    near_ok = [at("ปกติ3กม", 3, 3), at("ล้น5กม", 5, 5)]
+    assert nearest_alert(*HERE, rows=near_ok) == {}, "วง 4 กม.มีสถานีปกติ ต้องจบที่วงนั้น ไม่เตือน"
+
+    ring2 = [at("ล้น5กม", 5, 5), at("ปกติ7กม", 7, 3)]
+    assert nearest_alert(*HERE, rows=ring2)["station_id"] == "ล้น5กม", "วง 4 ว่าง → วง 6 เจอภัยต้องเตือน"
+
+    assert nearest_alert(*HERE, rows=[at("ล้น9กม", 9, 5)]) == {}, "เกิน 8 กม.ไม่นับ"
+    assert nearest_alert(*HERE, rows=[at("ไม่จัด2กม", 2, None), at("ล้น5กม", 5, 5)]) \
+        ["station_id"] == "ล้น5กม", "สถานีไม่จัดระดับไม่นับว่าเจอ ต้องขยายวงต่อ"
+
+    # เคสจริง เขตพระนคร 29 ก.ย. — เดิมรัศมี 15 กม.เลือกคลองลาดพร้าว (บางเขน 14.3 กม., ระดับ 5)
+    PN = (13.7563, 100.5018)
+    pn = [{"station_id": "สามเสน", "lat": 13.7881, "lon": 100.5091, "situation_level": 4},
+          {"station_id": "ลาดพร้าว", "lat": 13.85402, "lon": 100.58746, "situation_level": 5}]
+    assert nearest_alert(*PN, rows=pn)["station_id"] == "สามเสน", "ต้องเตือนจากเจ้าพระยาที่ใกล้"
 
     event = as_event(got)
     assert event["kind"] == "น้ำล้นตลิ่ง" and event["level"] == "แดง"
@@ -325,7 +357,7 @@ def demo():
     assert distance_km(*HERE, 18.79, 98.98) > 500
 
     print("✅ ผ่าน — เก็บทุกระดับ, ทิ้งสถานีไม่มีพิกัด/เวลา, badge เฉพาะ 4-5, ตัดค่าค้าง, "
-          "รัศมี 15 กม., ประวัติรายชั่วโมง, ข้อมูลพังไม่ล้ม")
+          "วงขยาย 4/6/8 กม., ประวัติรายชั่วโมง, ข้อมูลพังไม่ล้ม")
 
 
 if __name__ == "__main__":
