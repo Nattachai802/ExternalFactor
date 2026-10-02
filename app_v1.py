@@ -14,6 +14,7 @@ TH_TZ = timezone(timedelta(hours=7))
 
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
+from fastapi.responses import JSONResponse
 
 load_dotenv()
 
@@ -28,6 +29,7 @@ import modules.economic
 import modules.electricity
 import modules.energy
 import modules.food_price
+import modules.health
 import modules.holiday
 import modules.lucky_shirt
 import modules.myth
@@ -197,6 +199,13 @@ def resolve_branch(branch_id: str) -> dict:
 @app.get("/", summary="Health check")
 def root():
     return {"status": "ok", "service": "exFactor API v1"}
+
+
+# แยกจาก "/" ตั้งใจ — "/" ไว้ให้ Docker HEALTHCHECK (ไม่แตะ DB/เน็ต) อันนี้เช็ค dependency จริง
+@app.get("/health", summary="สุขภาพของ service + dependency (Postgres + API ภายนอก)")
+def health():
+    result = modules.health.run()
+    return result if result["status"] != "unhealthy" else JSONResponse(result, status_code=503)
 
 
 # ── สุขภาพของ cron ───────────────────────────────────────────
